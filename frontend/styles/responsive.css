@@ -1,0 +1,20 @@
+/* ===================================
+   Responsive Styles
+   =================================== */
+
+@media (max-width: 1200px) {
+    .compare-container {
+        grid-template-columns: 1fr;
+        height: auto;
+    }
+
+    .compare-panel {
+        min-height: 400px;
+    }
+}
+
+@media (max-width: 600px) {
+    .export-buttons {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}

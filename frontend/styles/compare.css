@@ -1,0 +1,240 @@
+/* ===================================
+   Compare View - 3 Column Layout
+   =================================== */
+
+/* Compare View - 3 Column Grid */
+.compare-container {
+    display: none;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 20px;
+    height: 800px;
+}
+
+.compare-container.active {
+    display: grid;
+}
+
+.compare-panel {
+    background: white;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+    border: 1px solid #eee;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+.compare-panel .header {
+    padding: 12px 18px;
+    background: #f8f9fa;
+    border-bottom: 1px solid #eee;
+    font-weight: 600;
+    color: #555;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.compare-panel.original .header {
+    background: linear-gradient(90deg, #10b981, #059669);
+    color: white;
+}
+
+.compare-panel.translated .header {
+    background: linear-gradient(90deg, #10b981, #059669);
+    color: white;
+}
+
+.compare-panel.ocr .header {
+    background: linear-gradient(90deg, #10b981, #059669);
+    color: white;
+}
+
+.compare-panel .preview {
+    padding: 10px;
+    flex: 1;
+    background-color: #1a1a2e;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+}
+
+.compare-panel .preview img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 4px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+/* OCR Text Block Styles - Full Width */
+.compare-panel .preview {
+    align-items: stretch;
+}
+
+.compare-panel.ocr .preview {
+    padding: 0;
+    align-items: stretch;
+    background-color: #ffffff !important;
+}
+
+/* Page wrapper with number indicator */
+.page-wrapper {
+    position: relative;
+    width: 100%;
+}
+
+.page-number-indicator {
+    text-align: center;
+    padding: 8px 16px;
+    font-size: 0.9rem;
+    color: #666;
+    background: #f5f5f5;
+    border-radius: 4px;
+    margin-bottom: 8px;
+}
+
+/* OCR Page Header */
+.ocr-page-header {
+    text-align: center;
+    padding: 12px 20px;
+    font-size: 1rem;
+    font-weight: 500;
+    color: #333;
+    background: #ffffff;
+    border-bottom: 1px solid #e5e5e5;
+}
+
+/* Combined Block Layout (Card-based) */
+.combined-block {
+    width: 100%;
+    margin-bottom: 20px;
+    border-bottom: 1px solid #e5e5e5;
+    padding-bottom: 16px;
+}
+
+.block-label {
+    display: inline-block;
+    background: linear-gradient(90deg, #10b981, #059669);
+    color: white;
+    padding: 4px 12px;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    margin-bottom: 12px;
+}
+
+/* Card Container */
+.block-row-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+/* Text Card Styles */
+.text-card {
+    background: #f8f9fa;
+    border: 1px solid #e5e5e5;
+    border-radius: 8px;
+    overflow: hidden;
+    transition: all 0.2s ease;
+}
+
+.text-card:hover {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+/* Card Header */
+.card-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    font-weight: 600;
+    font-size: 0.9rem;
+    border-bottom: 1px solid #e5e5e5;
+}
+
+.card-icon {
+    font-size: 1.1rem;
+    flex-shrink: 0;
+}
+
+.card-title {
+    color: #374151;
+}
+
+/* Card Content */
+.card-content {
+    padding: 12px 14px;
+    color: #1f2937;
+    line-height: 1.6;
+    word-wrap: break-word;
+    white-space: pre-wrap;
+    font-size: 0.95rem;
+}
+
+/* Card Type Specific Styles */
+.original-card .card-header {
+    background: linear-gradient(90deg, #f0fdf4, #dcfce7);
+    color: #065f46;
+}
+
+.original-card .card-icon {
+    color: #10b981;
+}
+
+.nllb-card .card-header {
+    background: linear-gradient(90deg, #dbeafe, #bfdbfe);
+    color: #1e3a8a;
+}
+
+.nllb-card .card-icon {
+    color: #3b82f6;
+}
+
+.refined-card .card-header {
+    background: linear-gradient(90deg, #fee2e2, #fecaca);
+    color: #991b1b;
+}
+
+.refined-card .card-icon {
+    color: #ef4444;
+}
+
+.result-card .card-header {
+    background: linear-gradient(90deg, #dbeafe, #bfdbfe);
+    color: #1e40af;
+}
+
+.result-card .card-icon {
+    color: #3b82f6;
+}
+
+/* Table Cell Styling */
+.combined-block.table-cell {
+    margin-left: 20px;
+    border-left: 2px solid #f59e0b;
+    padding-left: 12px;
+    margin-bottom: 8px;
+}
+
+.combined-block.table-cell .block-label {
+    background: linear-gradient(90deg, #f59e0b, #d97706);
+    font-size: 0.75rem;
+    padding: 2px 8px;
+}
+
+.combined-block.table-header {
+    background: rgba(245, 158, 11, 0.05);
+    border: 1px solid #fbbf24;
+    border-radius: 6px;
+    padding: 8px 12px;
+    margin-bottom: 8px;
+}
+
+.combined-block.table-header .block-label {
+    background: linear-gradient(90deg, #f59e0b, #d97706);
+}

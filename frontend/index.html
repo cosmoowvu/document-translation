@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="th">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document Translation - แปลเอกสาร</title>
+    <link rel="icon" href="data:,">
+
+    <!-- Styles -->
+    <link rel="stylesheet" href="styles/base.css?v=2">
+    <link rel="stylesheet" href="styles/upload.css?v=2">
+    <link rel="stylesheet" href="styles/buttons.css?v=3">
+    <link rel="stylesheet" href="styles/progress.css?v=2">
+    <link rel="stylesheet" href="styles/compare.css?v=3">
+    <link rel="stylesheet" href="styles/modal.css?v=2">
+    <link rel="stylesheet" href="styles/responsive.css?v=2">
+</head>
+
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header>
+            <h1>📄Document Translation - แปลเอกสาร</h1>
+            <p>อัปโหลดไฟล์ PDF, JPEG หรือ PNG และแปลภาษาทันที</p>
+        </header>
+
+        <!-- Upload Section -->
+        <div class="card" id="uploadSection">
+            <!-- Row 1: Languages -->
+            <div class="language-row">
+                <div class="form-group">
+                    <label>ภาษาต้นฉบับ</label>
+                    <select id="sourceLang">
+                        <option value="tha_Thai">ไทย</option>
+                        <option value="eng_Latn">อังกฤษ</option>
+                    </select>
+                </div>
+
+                <!-- Swap Button -->
+                <button type="button" class="swap-btn" onclick="swapLanguages()" title="สลับภาษา">
+                    ⇄
+                </button>
+
+                <div class="form-group">
+                    <label>ภาษาที่ต้องการแปล</label>
+                    <select id="targetLang">
+                        <option value="eng_Latn">อังกฤษ</option>
+                        <option value="tha_Thai">ไทย</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Row 2: Translation Mode & OCR Engine -->
+            <div class="language-row" style="margin-bottom: 24px;">
+                <div class="form-group">
+                    <label>🔄 โหมดการแปล</label>
+                    <select id="translationModel">
+                        <option value="typhoon_direct">🐘 Typhoon (Direct)</option>
+                        <option value="qwen_direct">Qwen 2.5 (Direct)</option>
+                        <option value="gemma_direct">Gemma 2 (Direct)</option>
+                        <option value="nllb_qwen">NLLB → Qwen 2.5</option>
+                        <option value="nllb_gemma">NLLB → Gemma 2</option>
+                        <option value="nllb_llama">NLLB → Llama 3.2</option>
+                    </select>
+                </div>
+
+                <!-- Spacer (same width as swap button) -->
+                <div style="width: 48px;"></div>
+
+                <div class="form-group">
+                    <label>🔍 OCR Engine</label>
+                    <select id="ocrEngine">
+                        <option value="docling">Docling</option>
+                        <option value="paddleocr">PaddleOCR</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Upload Area -->
+            <div class="upload-area" id="uploadArea">
+                <!-- Default upload content -->
+                <div class="upload-content" id="uploadContent">
+                    <div class="upload-icon">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke-width="1.5">
+                            <path stroke-linecap="round" stroke-linejoin="round"
+                                d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+                        </svg>
+                    </div>
+                    <p class="upload-text">คลิกเพื่ออัปโหลด หรือลากไฟล์มาที่นี่</p>
+                    <p class="supported-formats">รองรับ PDF, JPEG, PNG (สูงสุด 30MB)</p>
+                </div>
+
+                <!-- File display (shown when file is selected) -->
+                <div class="file-display" id="fileDisplay">
+                    <div class="file-icon">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke-width="1.5">
+                            <path stroke-linecap="round" stroke-linejoin="round"
+                                d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+                        </svg>
+                    </div>
+                    <p class="file-name" id="fileName">document.pdf</p>
+                    <p class="file-size" id="fileSize">0.32 MB</p>
+                </div>
+            </div>
+            <input type="file" id="fileInput" accept=".pdf,.png,.jpg,.jpeg" style="display: none;">
+
+            <!-- Button Row -->
+            <div class="button-row">
+                <button class="translate-btn" id="translateBtn" onclick="startTranslation()">
+                    🌐 แปลภาษา
+                </button>
+                <button class="clear-btn" id="clearBtn" onclick="removeFile()">
+                    ✕ ล้าง
+                </button>
+            </div>
+
+            <!-- Clear All Files Button -->
+            <div style="text-align: center; margin-top: 15px;">
+                <button onclick="clearAllFiles()"
+                    style="background: transparent; color: #888; border: 1px solid #555; padding: 5px 10px; border-radius: 4px; font-size: 0.75rem; cursor: pointer;"
+                    title="ลบไฟล์ทั้งหมดบน Server">
+                    🗑️ ล้างไฟล์ทั้งหมด
+                </button>
+            </div>
+        </div>
+
+        <!-- Progress Section -->
+        <div class="card progress-container" id="progressSection">
+            <h2><span class="spinner"></span> กำลังประมวลผล</h2>
+
+            <!-- Step indicators -->
+            <div style="margin-bottom: 15px; text-align: center;">
+                <span class="progress-step pending" id="stepAnalyze">📂 ตรวจสอบ</span>
+                <span class="progress-step pending" id="stepExtract">📖 ดึงข้อความ</span>
+                <span class="progress-step pending" id="stepTranslate">🔄 แปล</span>
+                <span class="progress-step pending" id="stepRefine" style="display: none;">📝 เกลาคำ</span>
+                <span class="progress-step pending" id="stepRender">🎨 สร้างไฟล์</span>
+            </div>
+
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill"></div>
+            </div>
+            <p class="progress-detail" id="progressDetail">กำลังเตรียมการ...</p>
+
+            <!-- Cancel Button -->
+            <div style="text-align: center; margin-top: 15px;">
+                <button class="clear-btn" onclick="cancelProcess()" style="background: #e74c3c; border-color: #e74c3c;">
+                    ยกเลิกกระบวนการ
+                </button>
+            </div>
+        </div>
+
+        <!-- Error Section -->
+        <div class="card error-message" id="errorSection">
+            <h2>❌ เกิดข้อผิดพลาด</h2>
+            <p id="errorText"></p>
+            <button class="reset-btn" onclick="resetApp()">ลองใหม่</button>
+        </div>
+
+        <!-- Compare Section -->
+        <div class="card" id="resultSection" style="display: none;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <h2 style="margin: 0;">📊 เปรียบเทียบผลลัพธ์</h2>
+                    <div class="result-info-badges" id="resultInfoBadges" style="display: flex; gap: 8px;">
+                        <!-- Will be populated by JS -->
+                    </div>
+                </div>
+                <button class="sync-toggle-btn" id="syncToggleBtn" onclick="toggleSyncScroll()" title="เลื่อนพร้อมกัน">
+                    🔗 Sync Scroll: OFF
+                </button>
+            </div>
+            <div class="compare-container active">
+                <!-- Column 1: Original File -->
+                <div class="compare-panel original">
+                    <div class="header">
+                        📄 ต้นฉบับ
+                        <button class="fullscreen-btn" onclick="openFullscreen('original')"
+                            title="ดูเต็มหน้าจอ">⛶</button>
+                    </div>
+                    <div class="preview" id="originalPreview">
+                        <p style="color: #999;">กำลังโหลด...</p>
+                    </div>
+                </div>
+
+                <!-- Column 2: OCR + Translated Text (Combined) -->
+                <div class="compare-panel text-panel">
+                    <div class="header">
+                        🔍 ข้อความการแปลภาษา
+                    </div>
+                    <div class="preview text-combined" id="textCombinedPreview">
+                        <p style="color: #999; padding: 20px; text-align: center;">กำลังโหลด...</p>
+                    </div>
+                </div>
+
+                <!-- Column 3: Translated File -->
+                <div class="compare-panel translated">
+                    <div class="header">
+                        🌐 แปลแล้ว
+                        <button class="fullscreen-btn" onclick="openFullscreen('translated')"
+                            title="ดูเต็มหน้าจอ">⛶</button>
+                    </div>
+                    <div class="preview" id="translatedPreview">
+                        <p style="color: #999;">กำลังโหลด...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Export Section -->
+        <div class="card export-container" id="exportSection">
+            <h2>📥 ดาวน์โหลด</h2>
+            <div class="export-buttons">
+                <a class="export-btn pdf" id="exportPdf">
+                    <span class="icon">📕</span>
+                    <span>PDF</span>
+                </a>
+                <a class="export-btn docx" id="exportDocx">
+                    <span class="icon">📘</span>
+                    <span>DOCX</span>
+                </a>
+                <a class="export-btn png" id="exportPng">
+                    <span class="icon">🖼️</span>
+                    <span>PNG</span>
+                </a>
+                <a class="export-btn jpg" id="exportJpg">
+                    <span class="icon">📷</span>
+                    <span>JPG</span>
+                </a>
+            </div>
+            <button class="reset-btn" onclick="resetApp()">🔄 แปลใหม่</button>
+        </div>
+
+        <!-- Footer -->
+        <footer
+            style="text-align: center; padding: 20px; color: #666; font-size: 0.9rem; margin-top: 300px; border-top: 1px solid #333;">
+            © 2026 Document Translation. All rights reserved.
+        </footer>
+    </div>
+
+    <!-- Fullscreen Modal -->
+    <div class="fullscreen-modal" id="fullscreenModal">
+        <button class="close-btn" onclick="closeFullscreen()">✕</button>
+        <h2 class="modal-title" id="modalTitle">ต้นฉบับ</h2>
+        <div class="modal-content" id="modalContent">
+            <!-- Images will be loaded here -->
+        </div>
+
+        <!-- Zoom Controls -->
+        <div class="zoom-controls">
+            <button class="zoom-btn" onclick="zoomOut()" title="ซูมออก">−</button>
+            <span class="zoom-level" id="zoomLevel">100%</span>
+            <button class="zoom-btn" onclick="zoomIn()" title="ซูมเข้า">+</button>
+            <button class="zoom-btn" onclick="resetZoom()" title="รีเซ็ต" style="font-size: 1rem;">↺</button>
+        </div>
+    </div>
+
+    <!-- Scripts (order matters!) -->
+    <script src="scripts/main.js"></script>
+    <script src="scripts/utils.js"></script>
+    <script src="scripts/modal.js"></script>
+    <script src="scripts/upload.js"></script>
+
+    <!-- New modular translation -->
+    <script type="module">
+        import { initTranslation, startTranslation as startTranslationModule, cancelProcess as cancelProcessModule, setCurrentJobId } from './scripts/translation/index.js';
+
+        // Generate UUID for job ID
+        function generateUUID() {
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+                const r = Math.random() * 16 | 0;
+                const v = c === 'x' ? r : (r & 0x3 | 0x8);
+                return v.toString(16);
+            });
+        }
+
+        // Initialize on load
+        const urlParams = new URLSearchParams(window.location.search);
+        const jobId = urlParams.get('job') || generateUUID();
+        setCurrentJobId(jobId);
+        initTranslation(jobId);
+
+        // Expose to global scope for onclick handlers
+        // Wrap async function for onclick compatibility
+        window.startTranslation = function () {
+            startTranslationModule().catch(err => {
+                console.error('Translation error:', err);
+                alert('เกิดข้อผิดพลาด: ' + err.message);
+            });
+        };
+        window.cancelProcess = cancelProcessModule;
+        window.setCurrentJobId = setCurrentJobId;
+
+        // Set global job ID for other scripts (for backward compatibility)
+        window.currentJobId = jobId;
+    </script>
+</body>
+
+</html>

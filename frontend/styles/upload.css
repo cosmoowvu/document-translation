@@ -1,0 +1,227 @@
+/* ===================================
+   Upload Area Styles
+   =================================== */
+
+/* Upload Area - Clean design */
+.upload-area {
+    border: 2px dashed #ccc;
+    border-radius: 12px;
+    padding: 50px 40px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    background: #fafafa;
+    margin-bottom: 20px;
+}
+
+.upload-area:hover {
+    border-color: #10b981;
+    background: #f0fdf4;
+}
+
+.upload-area.dragover {
+    border-color: #10b981;
+    background: #dcfce7;
+}
+
+.upload-area.has-file {
+    border-color: #10b981;
+    background: #f0fdf4;
+}
+
+.upload-icon {
+    margin-bottom: 16px;
+}
+
+.upload-icon svg {
+    width: 48px;
+    height: 48px;
+    stroke: #999;
+    fill: none;
+}
+
+.upload-area.has-file .upload-icon svg {
+    stroke: #10b981;
+}
+
+.upload-text {
+    font-size: 1rem;
+    color: #333;
+    margin-bottom: 8px;
+}
+
+.supported-formats {
+    font-size: 0.85rem;
+    color: #999;
+}
+
+/* File info inside upload area */
+.file-display {
+    display: none;
+}
+
+.file-display.active {
+    display: block;
+}
+
+.file-display .file-icon svg {
+    width: 48px;
+    height: 48px;
+    stroke: #10b981;
+    fill: none;
+    margin-bottom: 12px;
+}
+
+.file-display .file-name {
+    font-size: 1rem;
+    font-weight: 600;
+    color: #333;
+    margin-bottom: 4px;
+}
+
+.file-display .file-size {
+    font-size: 0.85rem;
+    color: #666;
+}
+
+/* Default upload content */
+.upload-content {
+    display: block;
+}
+
+.upload-content.hidden {
+    display: none;
+}
+
+/* Language Select Row */
+.language-row {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    gap: 16px;
+    align-items: end;
+    margin-bottom: 24px;
+}
+
+.form-group {
+    margin-bottom: 0;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: 600;
+    color: #333;
+    font-size: 0.9rem;
+}
+
+.form-group select {
+    width: 100%;
+    padding: 14px 16px;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    font-size: 1rem;
+    cursor: pointer;
+    background: white;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23666' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 16px center;
+}
+
+.form-group select:focus {
+    outline: none;
+    border-color: #10b981;
+    box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1);
+}
+
+/* File Preview Section */
+.file-info {
+    background: #f5f5f5;
+    padding: 24px;
+    border-radius: 8px;
+    border: none;
+}
+
+.file-details {
+    margin-bottom: 20px;
+    text-align: left;
+}
+
+.file-details p {
+    margin: 6px 0;
+    color: #333;
+    font-size: 0.95rem;
+}
+
+.file-details strong {
+    color: #059669;
+    font-weight: 500;
+}
+
+/* Hide old file preview section */
+#filePreviewSection {
+    display: none !important;
+}
+
+/* ===================================
+   OCR Engine Selector Styles
+   =================================== */
+
+.ocr-selector {
+    display: flex;
+    gap: 12px;
+    margin-top: 8px;
+}
+
+.ocr-option {
+    flex: 1;
+    cursor: pointer;
+    position: relative;
+}
+
+.ocr-option input[type="radio"] {
+    position: absolute;
+    opacity: 0;
+    cursor: pointer;
+}
+
+.ocr-label {
+    display: flex;
+    flex-direction: column;
+    padding: 14px 16px;
+    border: 2px solid #e0e0e0;
+    border-radius: 8px;
+    background: white;
+    transition: all 0.3s ease;
+}
+
+.ocr-option:hover .ocr-label {
+    border-color: #10b981;
+    background: #f0fdf4;
+}
+
+.ocr-option input[type="radio"]:checked+.ocr-label {
+    border-color: #10b981;
+    background: #dcfce7;
+    box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1);
+}
+
+.ocr-name {
+    font-weight: 600;
+    color: #333;
+    font-size: 0.95rem;
+    margin-bottom: 4px;
+}
+
+.ocr-desc {
+    font-size: 0.8rem;
+    color: #666;
+}
+
+.ocr-option input[type="radio"]:checked+.ocr-label .ocr-name {
+    color: #059669;
+}
+
+.ocr-option input[type="radio"]:checked+.ocr-label .ocr-desc {
+    color: #047857;
+}

@@ -1,0 +1,40 @@
+"""
+Application Configuration
+"""
+import os
+from pathlib import Path
+from pydantic_settings import BaseSettings
+
+
+class Settings(BaseSettings):
+    # Paths
+    BASE_DIR: Path = Path(__file__).resolve().parent.parent
+    UPLOAD_DIR: Path = BASE_DIR / "uploads"
+    OUTPUT_DIR: Path = BASE_DIR / "outputs"
+    
+    # Docling
+    DPI: int = 200
+    
+    # Ollama / Translation
+    OLLAMA_URL: str = "http://localhost:11434"
+    TRANSLATION_MODEL: str = "qwen2.5:3b"  # Default = 3B (optimized for GTX 1650)
+    BATCH_SIZE: int = 3  # จำนวน blocks ต่อ batch (ลดลงเพื่อให้ Qwen แม่นขึ้น)
+    
+    
+    # Font
+    FONT_PATH: str = "C:/Windows/Fonts/tahoma.ttf"
+    
+    # Limits
+    MAX_FILE_SIZE: int = 30 * 1024 * 1024  # 30MB
+    ALLOWED_EXTENSIONS: list = ["pdf", "png", "jpg", "jpeg", "docx", "pptx", "xlsx", "html"]
+    
+    class Config:
+        env_file = ".env"
+        extra = "ignore"  # ไม่สนใจ fields อื่นใน .env ที่ไม่ได้กำหนดไว้
+
+
+settings = Settings()
+
+# Create directories
+os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
+os.makedirs(settings.OUTPUT_DIR, exist_ok=True)

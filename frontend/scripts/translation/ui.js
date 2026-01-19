@@ -1,0 +1,548 @@
+/* ===================================
+   Translation UI Module
+   Handles all UI updates and rendering
+   =================================== */
+
+// Import API for preview URLs
+import { TranslationAPI } from './api.js';
+
+// Export UI functions
+export const TranslationUI = {
+    // Show progress with step indicators
+    showProgress(message, percent) {
+        const uploadSection = document.getElementById('uploadSection');
+        const errorSection = document.getElementById('errorSection');
+        const resultSection = document.getElementById('resultSection');
+        const exportSection = document.getElementById('exportSection');
+        const progressSection = document.getElementById('progressSection');
+        const progressFill = document.getElementById('progressFill');
+        const progressDetail = document.getElementById('progressDetail');
+
+        uploadSection.style.display = 'none';
+        errorSection.classList.remove('active');
+        resultSection.style.display = 'none';
+        exportSection.classList.remove('active');
+
+        progressSection.classList.add('active');
+        progressFill.style.width = percent + '%';
+        progressDetail.textContent = message;
+
+        // Update step indicators
+        const stepAnalyze = document.getElementById('stepAnalyze');
+        const stepExtract = document.getElementById('stepExtract');
+        const stepTranslate = document.getElementById('stepTranslate');
+        const stepRefine = document.getElementById('stepRefine');
+        const stepRender = document.getElementById('stepRender');
+
+        const modelElement = document.getElementById('translationModel');
+        const isNLLBRefine = modelElement && (modelElement.value === 'nllb_qwen' || modelElement.value === 'nllb_gemma');
+
+        // Show/hide Refine step
+        if (stepRefine) {
+            stepRefine.style.display = isNLLBRefine ? 'inline-block' : 'none';
+        }
+
+        // Dynamic label for extraction
+        const fileName = document.getElementById('fileName').textContent.trim();
+        if (fileName.toLowerCase().endsWith('.pdf')) {
+            stepExtract.textContent = '📖 ดึงข้อความ';
+        } else {
+            stepExtract.textContent = '📖 OCR';
+        }
+
+        // Reset all steps
+        const allSteps = isNLLBRefine
+            ? [stepAnalyze, stepExtract, stepTranslate, stepRefine, stepRender]
+            : [stepAnalyze, stepExtract, stepTranslate, stepRender];
+
+        allSteps.forEach(el => {
+            if (el) el.classList.remove('active', 'done', 'pending');
+        });
+
+        // Update step classes based on progress
+        if (isNLLBRefine) {
+            const msg = message.toLowerCase();
+            const isRefining = msg.includes('เกลา') || msg.includes('refine');
+
+            if (percent < 10) {
+                stepAnalyze.classList.add('active');
+                stepExtract.classList.add('pending');
+                stepTranslate.classList.add('pending');
+                stepRefine.classList.add('pending');
+                stepRender.classList.add('pending');
+            } else if (percent < 30) {
+                stepAnalyze.classList.add('done');
+                stepExtract.classList.add('active');
+                stepTranslate.classList.add('pending');
+                stepRefine.classList.add('pending');
+                stepRender.classList.add('pending');
+            } else if (isRefining || percent >= 55) {
+                if (percent < 80) {
+                    stepAnalyze.classList.add('done');
+                    stepExtract.classList.add('done');
+                    stepTranslate.classList.add('done');
+                    stepRefine.classList.add('active');
+                    stepRender.classList.add('pending');
+                } else {
+                    stepAnalyze.classList.add('done');
+                    stepExtract.classList.add('done');
+                    stepTranslate.classList.add('done');
+                    stepRefine.classList.add('done');
+                    stepRender.classList.add('active');
+                }
+            } else {
+                stepAnalyze.classList.add('done');
+                stepExtract.classList.add('done');
+                stepTranslate.classList.add('active');
+                stepRefine.classList.add('pending');
+                stepRender.classList.add('pending');
+            }
+        } else {
+            if (percent < 10) {
+                stepAnalyze.classList.add('active');
+                stepExtract.classList.add('pending');
+                stepTranslate.classList.add('pending');
+                stepRender.classList.add('pending');
+            } else if (percent < 30) {
+                stepAnalyze.classList.add('done');
+                stepExtract.classList.add('active');
+                stepTranslate.classList.add('pending');
+                stepRender.classList.add('pending');
+            } else if (percent < 80) {
+                stepAnalyze.classList.add('done');
+                stepExtract.classList.add('done');
+                stepTranslate.classList.add('active');
+                stepRender.classList.add('pending');
+            } else {
+                stepAnalyze.classList.add('done');
+                stepExtract.classList.add('done');
+                stepTranslate.classList.add('done');
+                stepRender.classList.add('active');
+            }
+        }
+
+        progressDetail.textContent = `${percent}% - ${message}`;
+    },
+
+    // Show error
+    showError(message) {
+        localStorage.removeItem('translationState');
+
+        const uploadSection = document.getElementById('uploadSection');
+        const progressSection = document.getElementById('progressSection');
+        const resultSection = document.getElementById('resultSection');
+        const exportSection = document.getElementById('exportSection');
+        const errorSection = document.getElementById('errorSection');
+        const errorText = document.getElementById('errorText');
+
+        uploadSection.style.display = 'none';
+        progressSection.classList.remove('active');
+        resultSection.style.display = 'none';
+        exportSection.classList.remove('active');
+
+        errorSection.classList.add('active');
+        errorText.textContent = message;
+    },
+
+    // Show result view
+    async showResult(jobId) {
+        const uploadSection = document.getElementById('uploadSection');
+        const progressSection = document.getElementById('progressSection');
+        const errorSection = document.getElementById('errorSection');
+        const resultSection = document.getElementById('resultSection');
+        const exportSection = document.getElementById('exportSection');
+
+        uploadSection.style.display = 'none';
+        progressSection.classList.remove('active');
+        errorSection.classList.remove('active');
+
+        resultSection.style.display = 'block';
+        exportSection.classList.add('active');
+
+        // Get number of pages
+        const numPages = await this.getNumPages(jobId);
+
+        // Load previews
+        await this.loadAllOriginalPages(jobId, numPages);
+        await this.loadOCRLogs(jobId);
+        await this.loadAllTranslatedPages(jobId, numPages);
+
+        // Set export links
+        document.getElementById('exportPdf').href = TranslationAPI.getExportUrl(jobId, 'pdf');
+        document.getElementById('exportDocx').href = TranslationAPI.getExportUrl(jobId, 'docx');
+        document.getElementById('exportPng').href = TranslationAPI.getExportUrl(jobId, 'png');
+        document.getElementById('exportJpg').href = TranslationAPI.getExportUrl(jobId, 'jpg');
+    },
+
+    // Get number of pages from logs
+    async getNumPages(jobId) {
+        try {
+            const data = await TranslationAPI.getLogs(jobId);
+            const pageKeys = Object.keys(data.block_logs || {});
+            return pageKeys.length || 1;
+        } catch (error) {
+            console.error('Error getting page count:', error);
+            return 1;
+        }
+    },
+
+    // Load all original pages
+    async loadAllOriginalPages(jobId, numPages) {
+        const originalPreview = document.getElementById('originalPreview');
+        originalPreview.innerHTML = '';
+
+        for (let page = 1; page <= numPages; page++) {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'page-wrapper';
+
+            const pageIndicator = document.createElement('div');
+            pageIndicator.className = 'page-number-indicator';
+            pageIndicator.textContent = `หน้า ${page} / ${numPages}`;
+            wrapper.appendChild(pageIndicator);
+
+            const skeleton = document.createElement('div');
+            skeleton.className = 'skeleton-loader';
+            skeleton.id = `original-skeleton-${page}`;
+            wrapper.appendChild(skeleton);
+
+            const img = document.createElement('img');
+            img.src = TranslationAPI.getPreviewUrl(jobId, page, 'original');
+            img.alt = `Original Page ${page}`;
+            img.style.display = 'none';
+
+            img.onload = function () {
+                skeleton.style.display = 'none';
+                this.style.display = 'block';
+            };
+            img.onerror = function () {
+                skeleton.style.display = 'none';
+                this.style.display = 'none';
+            };
+            wrapper.appendChild(img);
+            originalPreview.appendChild(wrapper);
+        }
+    },
+
+    // Load all translated pages
+    async loadAllTranslatedPages(jobId, numPages) {
+        const translatedPreview = document.getElementById('translatedPreview');
+        translatedPreview.innerHTML = '';
+
+        for (let page = 1; page <= numPages; page++) {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'page-wrapper';
+
+            const pageIndicator = document.createElement('div');
+            pageIndicator.className = 'page-number-indicator';
+            pageIndicator.textContent = `หน้า ${page} / ${numPages}`;
+            wrapper.appendChild(pageIndicator);
+
+            const skeleton = document.createElement('div');
+            skeleton.className = 'skeleton-loader';
+            skeleton.id = `translated-skeleton-${page}`;
+            wrapper.appendChild(skeleton);
+
+            const img = document.createElement('img');
+            img.src = TranslationAPI.getPreviewUrl(jobId, page, 'translated');
+            img.alt = `Translated Page ${page}`;
+            img.style.display = 'none';
+
+            img.onload = function () {
+                skeleton.style.display = 'none';
+                this.style.display = 'block';
+            };
+            img.onerror = function () {
+                skeleton.style.display = 'none';
+                this.style.display = 'none';
+            };
+            wrapper.appendChild(img);
+            translatedPreview.appendChild(wrapper);
+        }
+    },
+
+    // Load OCR logs with combined 3-column layout
+    async loadOCRLogs(jobId) {
+        const textCombinedPreview = document.getElementById('textCombinedPreview');
+
+        // Get model info
+        const modelElement = document.getElementById('translationModel');
+        const modelName = modelElement ? modelElement.options[modelElement.selectedIndex].text : 'Unknown Model';
+        const ocrName = 'EasyOCR';
+
+        // Fetch total time and languages
+        let timeBadge = '';
+        let langBadge = '';
+        let ocrBadge = '';  // ✅ Declare here, outside try block
+
+        try {
+            const statusData = await TranslationAPI.pollStatus(jobId);
+
+            // Time Badge
+            if (statusData.stats && statusData.stats.total_seconds) {
+                const seconds = statusData.stats.total_seconds;
+                let timeText;
+                if (seconds >= 60) {
+                    const mins = Math.floor(seconds / 60);
+                    const secs = Math.round(seconds % 60);
+                    timeText = `${mins}m ${secs}s`;
+                } else {
+                    timeText = `${Math.round(seconds)}s`;
+                }
+                timeBadge = `<span class="badge" style="background-color: #e3f2fd; color: #1565c0; padding: 4px 8px; border-radius: 4px; font-size: 0.8rem;">⏱ ${timeText}</span>`;
+            }
+
+            // Language Badge
+            let sourceLang = 'tha_Thai';
+            let targetLang = 'eng_Latn';
+
+            // Try to get from stats first (persistent)
+            if (statusData.stats && statusData.stats.languages) {
+                sourceLang = statusData.stats.languages.source;
+                targetLang = statusData.stats.languages.target;
+            } else {
+                // Fallback to current DOM selection (might be wrong if page refreshed)
+                const sourceEl = document.getElementById('sourceLang');
+                const targetEl = document.getElementById('targetLang');
+                if (sourceEl) sourceLang = sourceEl.value;
+                if (targetEl) targetLang = targetEl.value;
+            }
+
+            // Map codes to flags/names
+            const langMap = {
+                'tha_Thai': '🇹🇭 Thai',
+                'eng_Latn': '🇬🇧 English',
+                'zho_Hans': '🇨🇳 Chinese',
+                'zho_Hant': '🇨🇳 Chinese',
+                'jpn_Jpan': '🇯🇵 Japanese'
+            };
+
+            const sourceName = langMap[sourceLang] || sourceLang;
+            const targetName = langMap[targetLang] || targetLang;
+
+            langBadge = `<span class="badge" style="background-color: #f3e5f5; color: #7b1fa2; padding: 4px 8px; border-radius: 4px; font-size: 0.8rem;">${sourceName} ➝ ${targetName}</span>`;
+
+            // OCR Engine Badge
+            if (statusData.stats && statusData.stats.ocr_engine) {
+                const ocrEngine = statusData.stats.ocr_engine;
+                const ocrName = ocrEngine === 'paddleocr' ? 'PaddleOCR' : 'Docling';
+                ocrBadge = `<span class="badge" style="background-color: #fff3e0; color: #e65100; padding: 4px 8px; border-radius: 4px; font-size: 0.8rem;">🔍 ${ocrName}</span>`;
+            }
+
+        } catch (e) {
+            console.log('Could not fetch stats:', e);
+        }
+
+        document.getElementById('resultInfoBadges').innerHTML = `
+            <span class="badge" style="background-color: #e0f2f1; color: #00695c; padding: 4px 8px; border-radius: 4px; font-size: 0.8rem;">
+                🤖 ${modelName}
+            </span>
+            ${langBadge}
+            ${ocrBadge}
+            ${timeBadge}
+        `;
+
+        textCombinedPreview.innerHTML = '<p style="color: #999; padding: 20px; text-align: center;">กำลังโหลด...</p>';
+
+        try {
+            const data = await TranslationAPI.getLogs(jobId);
+            const blockLogs = data.block_logs || {};
+            let combinedHTML = '';
+
+            const pages = Object.keys(blockLogs).sort();
+            const totalPages = pages.length;
+
+            if (pages.length === 0) {
+                textCombinedPreview.innerHTML = '<p style="color: #999; padding: 20px; text-align: center;">ไม่มีข้อมูล</p>';
+                return;
+            }
+
+            for (let i = 0; i < pages.length; i++) {
+                const pageKey = pages[i];
+                const logText = blockLogs[pageKey];
+                const pageNum = pageKey.replace('page_', '');
+
+                combinedHTML += `<div class="ocr-page-header" data-page="${pageNum}">หน้า ${parseInt(pageNum)} / ${totalPages}</div>`;
+
+                const blocks = this.parseBlockLog(logText, pageNum);
+
+                blocks.forEach(block => {
+                    combinedHTML += this.createCombinedBlockHTML(block.num, block.original, block.nllb, block.translated, pageNum, block.isTable, block.isHeader);
+                });
+            }
+
+            textCombinedPreview.innerHTML = combinedHTML;
+
+        } catch (error) {
+            console.error('Error loading OCR logs:', error);
+            textCombinedPreview.innerHTML = `<p style="color: #e74c3c; padding: 20px;">เกิดข้อผิดพลาด: ${error.message}</p>`;
+        }
+    },
+
+    // Parse block log text
+    parseBlockLog(logText, pageNum) {
+        const blocks = [];
+        const lines = logText.split('\n');
+
+        let currentBlock = null;
+        let currentOriginal = '';
+        let currentNLLB = '';
+        let currentTranslated = '';
+        let currentTable = null;
+
+        for (const line of lines) {
+            // Match table header
+            const tableMatch = line.match(/^TABLE (\d+) \[(\d+)x(\d+)\]$/);
+            if (tableMatch) {
+                if (currentBlock) {
+                    blocks.push({
+                        num: currentBlock.num,
+                        original: currentOriginal.trim(),
+                        nllb: currentNLLB.trim(),
+                        translated: currentTranslated.trim(),
+                        isTable: false
+                    });
+                    currentBlock = null;
+                }
+                currentTable = {
+                    num: tableMatch[1],
+                    rows: tableMatch[2],
+                    cols: tableMatch[3]
+                };
+                blocks.push({
+                    num: `Table ${tableMatch[1]}`,
+                    original: `📊 ตาราง ${tableMatch[2]}x${tableMatch[3]}`,
+                    nllb: '',
+                    translated: `📊 Table ${tableMatch[2]}x${tableMatch[3]}`,
+                    isTable: true,
+                    isHeader: true
+                });
+                continue;
+            }
+
+            // Match cell
+            const cellMatch = line.match(/^Cell \[(\d+),(\d+)\] \[(TRANSLATED|SKIPPED)\] \(detected: (.+)\)$/);
+            if (cellMatch) {
+                if (currentBlock) {
+                    blocks.push({
+                        num: currentBlock.num,
+                        original: currentOriginal.trim(),
+                        nllb: currentNLLB.trim(),
+                        translated: currentTranslated.trim(),
+                        isTable: !!currentTable
+                    });
+                }
+                currentBlock = {
+                    num: `[${cellMatch[1]},${cellMatch[2]}]`,
+                    status: cellMatch[3],
+                    lang: cellMatch[4],
+                    isCell: true
+                };
+                currentOriginal = '';
+                currentNLLB = '';
+                currentTranslated = '';
+                continue;
+            }
+
+            // Match block header
+            const blockMatch = line.match(/^Block (\d+) \[(TRANSLATED|SKIPPED)\] \(detected: (.+)\)$/);
+            if (blockMatch) {
+                if (currentBlock) {
+                    blocks.push({
+                        num: currentBlock.num,
+                        original: currentOriginal.trim(),
+                        nllb: currentNLLB.trim(),
+                        translated: currentTranslated.trim(),
+                        isTable: false
+                    });
+                }
+                currentTable = null;
+                currentBlock = {
+                    num: blockMatch[1],
+                    status: blockMatch[2],
+                    lang: blockMatch[3]
+                };
+                currentOriginal = '';
+                currentNLLB = '';
+                currentTranslated = '';
+            }
+            // Match content lines
+            else if (line.trim().startsWith('Original:')) {
+                currentOriginal = line.replace(/^\s*Original:\s*/, '');
+            }
+            else if (line.trim().startsWith('NLLB:')) {
+                currentNLLB = line.replace(/^\s*NLLB:\s*/, '');
+            }
+            else if (line.trim().startsWith('Result:')) {
+                currentTranslated = line.replace(/^\s*Result:\s*/, '');
+            }
+        }
+
+        // Save last block
+        if (currentBlock) {
+            blocks.push({
+                num: currentBlock.num,
+                original: currentOriginal.trim(),
+                nllb: currentNLLB.trim(),
+                translated: currentTranslated.trim(),
+                isTable: !!currentTable
+            });
+        }
+
+        return blocks;
+    },
+
+    // Create combined block HTML
+    createCombinedBlockHTML(blockNum, originalText, nllbText, translatedText, pageNum, isTable = false, isHeader = false) {
+        const blockId = `p${pageNum}_b${blockNum}`;
+        const tableClass = isTable ? 'table-cell' : '';
+        const headerClass = isHeader ? 'table-header' : '';
+        const labelPrefix = isTable && !isHeader ? 'Cell' : (isTable ? '' : 'Block');
+
+        const hasNLLB = nllbText && nllbText.trim().length > 0;
+
+        const escapeHTML = (text) => {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        };
+
+        return `
+            <div class="combined-block ${tableClass} ${headerClass}" data-block-id="${blockId}" data-page="${pageNum}">
+                <div class="block-label">${labelPrefix} ${blockNum}</div>
+                <div class="block-row-cards">
+                    <div class="text-card original-card">
+                        <div class="card-header">
+                            <span class="card-icon">🔍</span>
+                            <span class="card-title">ข้อความต้นฉบับ</span>
+                        </div>
+                        <div class="card-content">${escapeHTML(originalText)}</div>
+                    </div>
+                    ${hasNLLB ? `
+                    <div class="text-card nllb-card">
+                        <div class="card-header">
+                            <span class="card-icon">🌐</span>
+                            <span class="card-title">ข้อความแปลภาษา</span>
+                        </div>
+                        <div class="card-content">${escapeHTML(nllbText)}</div>
+                    </div>
+                    <div class="text-card refined-card">
+                        <div class="card-header">
+                            <span class="card-icon">📝</span>
+                            <span class="card-title">ข้อความที่เกลาคำ</span>
+                        </div>
+                        <div class="card-content">${escapeHTML(translatedText)}</div>
+                    </div>
+                    ` : `
+                    <div class="text-card result-card">
+                        <div class="card-header">
+                            <span class="card-icon">📝</span>
+                            <span class="card-title">ข้อความแปลภาษา</span>
+                        </div>
+                        <div class="card-content">${escapeHTML(translatedText)}</div>
+                    </div>
+                    `}
+                </div>
+            </div>
+        `;
+    }
+};

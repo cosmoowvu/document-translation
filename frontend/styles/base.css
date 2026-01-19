@@ -1,0 +1,81 @@
+/* ===================================
+   Base Styles - Reset, Body, Header
+   =================================== */
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 50%, #a5d6a7 100%);
+    min-height: 100vh;
+    padding: 40px 20px;
+}
+
+.container {
+    max-width: 1400px;
+    margin: 0 auto;
+}
+
+/* Header - Clean style */
+header {
+    text-align: center;
+    margin-bottom: 30px;
+}
+
+header h1 {
+    font-size: 2rem;
+    color: #333;
+    margin-bottom: 8px;
+    font-weight: 700;
+}
+
+header h1 .icon {
+    color: #10b981;
+}
+
+header p {
+    color: #666;
+    font-size: 1rem;
+}
+
+/* Cards */
+.card {
+    background: white;
+    border-radius: 16px;
+    padding: 30px;
+    margin-bottom: 20px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+}
+
+.card h2 {
+    color: #333;
+    margin-bottom: 20px;
+    font-size: 1.5rem;
+    display: none;
+}
+
+/* Hidden file input */
+#fileInput {
+    display: none;
+}
+
+/* Error */
+.error-message {
+    display: none;
+    background: #fef0ef;
+    border: 2px solid #e74c3c;
+    border-radius: 12px;
+    padding: 20px;
+    text-align: center;
+    color: #e74c3c;
+}
+
+.error-message.active {
+    display: block;
+}

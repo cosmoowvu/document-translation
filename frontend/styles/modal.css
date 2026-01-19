@@ -1,0 +1,134 @@
+/* ===================================
+   Fullscreen Modal & Zoom Controls
+   =================================== */
+
+/* Fullscreen Button */
+.fullscreen-btn {
+    float: right;
+    background: rgba(255, 255, 255, 0.2);
+    border: none;
+    color: white;
+    padding: 4px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 1rem;
+    transition: background 0.3s;
+}
+
+.fullscreen-btn:hover {
+    background: rgba(255, 255, 255, 0.3);
+}
+
+/* Fullscreen Modal */
+.fullscreen-modal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.95);
+    z-index: 9999;
+    overflow: auto;
+    padding: 20px;
+}
+
+.fullscreen-modal.active {
+    display: block;
+}
+
+.fullscreen-modal .close-btn {
+    position: fixed;
+    top: 20px;
+    right: 30px;
+    font-size: 2rem;
+    color: white;
+    background: rgba(255, 255, 255, 0.1);
+    border: none;
+    padding: 10px 20px;
+    border-radius: 8px;
+    cursor: pointer;
+    z-index: 10000;
+}
+
+.fullscreen-modal .close-btn:hover {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+.fullscreen-modal .modal-title {
+    text-align: center;
+    color: white;
+    font-size: 1.5rem;
+    margin-bottom: 20px;
+    padding-top: 10px;
+}
+
+.fullscreen-modal .modal-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 20px;
+    max-width: 1200px;
+    margin: 0 auto;
+    transform-origin: center center;
+}
+
+.fullscreen-modal .modal-content img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 8px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+    pointer-events: none;
+    user-select: none;
+}
+
+.fullscreen-modal.zoomed {
+    cursor: grab;
+}
+
+.fullscreen-modal.zoomed.dragging {
+    cursor: grabbing;
+}
+
+/* Zoom Controls */
+.zoom-controls {
+    position: fixed;
+    bottom: 30px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 10px;
+    background: rgba(0, 0, 0, 0.7);
+    padding: 10px 20px;
+    border-radius: 30px;
+    z-index: 10001;
+}
+
+.zoom-btn {
+    width: 44px;
+    height: 44px;
+    border: none;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.2);
+    color: white;
+    font-size: 1.5rem;
+    cursor: pointer;
+    transition: all 0.3s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.zoom-btn:hover {
+    background: rgba(255, 255, 255, 0.3);
+}
+
+.zoom-level {
+    color: white;
+    font-size: 1rem;
+    display: flex;
+    align-items: center;
+    padding: 0 10px;
+    min-width: 60px;
+    justify-content: center;
+}
