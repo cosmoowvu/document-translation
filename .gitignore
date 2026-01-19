@@ -58,8 +58,17 @@ outputs/
 temp/
 tmp/
 
-# Models (if large)
-models/*.pt
-models/*.bin
+# Models (large files - should not be pushed to GitHub)
+backend/models/
+**/models/**/*.bin
+**/models/**/*.pt
 *.pth
 *.onnx
+
+# Virtual environments (should never be pushed)
+venv/
+.venv/
+ENV/
+env/
+**/venv/
+**/.venv/
