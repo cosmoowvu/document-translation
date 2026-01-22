@@ -59,6 +59,17 @@ def process_translation(job_id: str, file_path: str, source_lang: str, target_la
     logger.log_translation_mode(translation_mode)  # ✅ Log translation mode
     
     try:
+        # ✅ Check if cancelled before starting OCR
+        if job_status.get(job_id, {}).get("cancelled", False):
+            print(f"✅ Job {job_id[:8]}... cancelled before OCR started")
+            return
+        
+        # ✅ Check if file still exists (race condition: file deleted after cancel)
+        import os
+        if not os.path.exists(file_path):
+            print(f"⚠️ Job {job_id[:8]}... file deleted (likely cancelled)")
+            return
+        
         # Step 1: OCR
         job_status[job_id] = {
             "status": "processing",
@@ -161,16 +172,22 @@ def process_translation(job_id: str, file_path: str, source_lang: str, target_la
                 )
             elif translation_mode == "typhoon_direct":
                 # Typhoon Direct - use specialized translation method
+                # ✅ Pass job_status and job_id for cancel support
                 translated_blocks, stats = translation_service.translate_blocks_typhoon(
                     page_data["blocks"], 
                     target_lang,
-                    source_lang=source_lang
+                    source_lang=source_lang,
+                    job_status=job_status,
+                    job_id=job_id
                 )
             else:
                 # Direct LLM translation (Qwen/Gemma)
+                # ✅ Pass job_status and job_id for cancel  support
                 translated_blocks, stats = translation_service.translate_blocks(
                     page_data["blocks"], 
-                    target_lang
+                    target_lang,
+                    job_status=job_status,
+                    job_id=job_id
                 )
             # Get page key (could be int or string from JSON)
             page_key = page_no if page_no in doc_result["pages"] else str(page_no)

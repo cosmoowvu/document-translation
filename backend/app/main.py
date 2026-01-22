@@ -2,10 +2,19 @@
 FastAPI Application Entry Point
 Document Translation Web Application
 """
+import os
+from pathlib import Path
+from dotenv import load_dotenv
+
+# Load .env file BEFORE importing anything else
+env_path = Path(__file__).parent.parent / ".env"
+load_dotenv(dotenv_path=env_path)
+print(f"✅ Loaded .env from: {env_path}")
+print(f"   TYPHOON_OCR_API_KEY: {'SET' if os.getenv('TYPHOON_OCR_API_KEY') else 'NOT SET'}")
+
 import asyncio
 import shutil
 import time
-from pathlib import Path
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI

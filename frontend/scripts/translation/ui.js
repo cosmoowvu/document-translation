@@ -324,8 +324,20 @@ export const TranslationUI = {
             // OCR Engine Badge
             if (statusData.stats && statusData.stats.ocr_engine) {
                 const ocrEngine = statusData.stats.ocr_engine;
-                const ocrName = ocrEngine === 'paddleocr' ? 'PaddleOCR' : 'Docling';
-                ocrBadge = `<span class="badge" style="background-color: #fff3e0; color: #e65100; padding: 4px 8px; border-radius: 4px; font-size: 0.8rem;">🔍 ${ocrName}</span>`;
+                let ocrName, ocrEmoji;
+
+                if (ocrEngine === 'paddleocr') {
+                    ocrName = 'PaddleOCR';
+                    ocrEmoji = '🏓';
+                } else if (ocrEngine === 'typhoon' || ocrEngine === 'typhoon-api') {
+                    ocrName = 'Typhoon OCR';
+                    ocrEmoji = '🌪️';
+                } else {
+                    ocrName = 'Docling';
+                    ocrEmoji = '📘';
+                }
+
+                ocrBadge = `<span class="badge" style="background-color: #fff3e0; color: #e65100; padding: 4px 8px; border-radius: 4px; font-size: 0.8rem;">${ocrEmoji} ${ocrName}</span>`;
             }
 
         } catch (e) {
@@ -387,6 +399,7 @@ export const TranslationUI = {
         let currentOriginal = '';
         let currentNLLB = '';
         let currentTranslated = '';
+        let currentSection = null;  // Track which section we're in
         let currentTable = null;
 
         for (const line of lines) {
@@ -468,12 +481,30 @@ export const TranslationUI = {
             // Match content lines
             else if (line.trim().startsWith('Original:')) {
                 currentOriginal = line.replace(/^\s*Original:\s*/, '');
+                currentSection = 'original';
             }
             else if (line.trim().startsWith('NLLB:')) {
                 currentNLLB = line.replace(/^\s*NLLB:\s*/, '');
+                currentSection = 'nllb';
             }
             else if (line.trim().startsWith('Result:')) {
                 currentTranslated = line.replace(/^\s*Result:\s*/, '');
+                currentSection = 'result';
+            }
+            // Continuation lines
+            else if (currentBlock && line.trim() &&
+                !line.includes('Block ') &&
+                !line.includes('TABLE ') &&
+                !line.includes('Cell ') &&
+                !line.includes('----')) {
+                // Append to current section
+                if (currentSection === 'result') {
+                    currentTranslated += '\n' + line;
+                } else if (currentSection === 'nllb') {
+                    currentNLLB += '\n' + line;
+                } else if (currentSection === 'original') {
+                    currentOriginal += '\n' + line;
+                }
             }
         }
 

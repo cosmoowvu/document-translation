@@ -91,7 +91,13 @@ class BatchTranslator:
         self.batch_size = batch_size
         self.max_retries = 2
     
-    def translate_blocks(self, blocks: List[Dict], target_lang: str) -> Tuple[List[Dict], Dict]:
+    def translate_blocks(
+        self, 
+        blocks: List[Dict], 
+        target_lang: str,
+        job_status: dict = None,
+        job_id: str = None
+    ) -> Tuple[List[Dict], Dict]:
         """
         แปล text blocks ทั้งหมด
         - แบ่งเป็น batches
@@ -173,6 +179,12 @@ class BatchTranslator:
         temp_results = [None] * len(to_translate)
         
         for batch_idx in range(num_batches):
+            # ✅ Check cancelled flag before each batch
+            if job_status and job_id and job_status.get(job_id, {}).get("cancelled", False):
+                print("   🚫 Job cancelled - stopping batch translation")
+                # Return what we have so far
+                return [r for r in all_results if r is not None], stats
+            
             start_idx = batch_idx * self.batch_size
             end_idx = min(start_idx + self.batch_size, len(to_translate))
             batch = to_translate[start_idx:end_idx]

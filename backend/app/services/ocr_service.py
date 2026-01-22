@@ -38,7 +38,7 @@ class DoclingOCRService:
             
             # EasyOCR options for both PDF and Image
             easyocr_options = EasyOcrOptions(
-                force_full_page_ocr=True,  # Force EasyOCR to run on entire page
+                force_full_page_ocr=False,  # ✅ Let Docling extract text layer first (more accurate than OCR)
                 lang=easyocr_langs  # EasyOCR language codes
             )
             
@@ -160,6 +160,98 @@ class DoclingOCRService:
         return tables
 
 
+class TyphoonOCRService:
+    """Typhoon OCR via Cloud API (SCB10X) using typhoon-ocr package"""
+    
+    def __init__(self):
+        self.api_key = os.getenv("TYPHOON_OCR_API_KEY")
+        if not self.api_key or self.api_key == "your_api_key_here":
+            raise ValueError(
+                "TYPHOON_OCR_API_KEY not properly set in .env file. "
+                "Get your API key from https://playground.opentyphoon.ai/api-key"
+            )
+        
+        # Set API key for typhoon-ocr package
+        os.environ["TYPHOON_OCR_API_KEY"] = self.api_key
+    
+    def process_document(self, file_path: str, source_lang: str = "tha_Thai") -> Dict[str, Any]:
+        """Process document using Typhoon OCR Cloud API"""
+        from typhoon_ocr import ocr_document
+        
+        print(f"🌪️ Using Typhoon OCR (Cloud API)")
+        
+        # Determine file type and page count
+        file_ext = os.path.splitext(file_path)[1].lower()
+        is_pdf = file_ext == '.pdf'
+        
+        if is_pdf:
+            # Get PDF page count
+            try:
+                import fitz  # PyMuPDF
+                pdf_doc = fitz.open(file_path)
+                num_pages = len(pdf_doc)
+                pdf_doc.close()
+            except ImportError:
+                # Fallback: use pypdf (already installed with typhoon-ocr)
+                from pypdf import PdfReader
+                reader = PdfReader(file_path)
+                num_pages = len(reader.pages)
+        else:
+            num_pages = 1
+        
+        print(f"   📄 Processing {num_pages} page(s)...")
+        
+        # Process each page
+        pages = {}
+        for page_no in range(1, num_pages + 1):
+            print(f"   🔍 Page {page_no}/{num_pages}...")
+            
+            try:
+                # Call Typhoon OCR API
+                markdown_text = ocr_document(
+                    pdf_or_image_path=file_path,
+                    page_num=page_no
+                )
+                
+                print(f"   ✅ Page {page_no}: Extracted {len(markdown_text)} characters")
+                
+                # Convert markdown to standardized block format
+                # For now, treat entire markdown as one text block
+                # TODO: Parse markdown to extract individual text blocks and tables
+                
+                # ✅ Add margins for Typhoon OCR (2 inches from edges)
+                margin_inches = 2
+                margin_points = margin_inches * 72  # 1 inch = 72 points
+                
+                blocks = [{
+                    "text": markdown_text,
+                    "bbox": {
+                        "x1": margin_points,  # 2 inches from left
+                        "y1": margin_points,  # 2 inches from top
+                        "x2": 595 - margin_points,  # 2 inches from right (A4 width = 595)
+                        "y2": 842 - margin_points   # 2 inches from bottom (A4 height = 842)
+                    },
+                    "label": "text"
+                }] if markdown_text else []
+                
+                pages[page_no] = {
+                    "width": 595,   # A4 width in points
+                    "height": 842,  # A4 height in points
+                    "blocks": blocks,
+                    "tables": []  # TODO: Parse markdown tables
+                }
+                
+            except Exception as e:
+                print(f"   ❌ Page {page_no} failed: {e}")
+                raise
+        
+        return {
+            "num_pages": num_pages,
+            "pages": pages,
+            "ocr_engine": "typhoon-api"
+        }
+
+
 class PaddleOCRService:
     """PaddleOCR via external microservice (port 8001)"""
     
@@ -186,7 +278,8 @@ class PaddleOCRService:
         with open(file_path, 'rb') as f:
             files = {'file': (os.path.basename(file_path), f)}
             data = {'lang': paddle_lang}
-            response = requests.post(self.service_url, files=files, data=data, timeout=120)
+            # ✅ Increased timeout for large PDFs (5 minutes)
+            response = requests.post(self.service_url, files=files, data=data, timeout=300)
         
         if response.status_code == 200:
             print("✅ PaddleOCR Service responded successfully")
@@ -212,6 +305,7 @@ class OCRService:
     def __init__(self):
         self._docling = DoclingOCRService()
         self._paddle = PaddleOCRService()
+        self._typhoon = None  # Lazy load (requires API key)
     
     def process_document(
         self, 
@@ -225,11 +319,33 @@ class OCRService:
         Args:
             file_path: Path to document
             source_lang: Language code (e.g. "tha_Thai", "eng_Latn")
-            ocr_engine: "docling" หรือ "paddleocr"
+            ocr_engine: "docling", "paddleocr", หรือ "typhoon"
         """
         print(f"📸 Using OCR Engine: {ocr_engine.upper()}")
         
-        if ocr_engine == "paddleocr":
+        if ocr_engine == "typhoon":
+            # Lazy load Typhoon service (only initialize if needed)
+            if self._typhoon is None:
+                try:
+                    self._typhoon = TyphoonOCRService()
+                except ValueError as e:
+                    print(f"⚠️ Typhoon OCR not configured: {e}")
+                    print(f"🔄 Falling back to Docling...")
+                    result = self._docling.process_document(file_path, source_lang)
+                    result["ocr_engine"] = "docling (typhoon not configured)"
+                    return result
+            
+            # Try Typhoon OCR
+            try:
+                return self._typhoon.process_document(file_path, source_lang)
+            except Exception as e:
+                print(f"⚠️ Typhoon OCR failed: {e}")
+                print(f"🔄 Falling back to Docling...")
+                result = self._docling.process_document(file_path, source_lang)
+                result["ocr_engine"] = "docling (fallback from typhoon)"
+                return result
+        
+        elif ocr_engine == "paddleocr":
             try:
                 return self._paddle.process_document(file_path, source_lang)
             except Exception as e:

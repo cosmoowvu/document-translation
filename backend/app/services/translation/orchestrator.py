@@ -47,13 +47,20 @@ class TranslationOrchestrator:
                 total_pages=total_pages
             )
         else:
-            return self.batch_translator.translate_blocks(blocks, target_lang)
+            return self.batch_translator.translate_blocks(
+                blocks, 
+                target_lang,
+                job_status=job_status,
+                job_id=job_id
+            )
     
     def translate_blocks_typhoon(
         self,
         blocks: List[Dict],
         target_lang: str,
-        source_lang: str = "tha_Thai"
+        source_lang: str = "tha_Thai",
+        job_status: dict = None,
+        job_id: str = None
     ) -> Tuple[List[Dict], Dict]:
         """
         Typhoon Direct translation for Thai ↔ English
@@ -88,15 +95,16 @@ class TranslationOrchestrator:
         if not to_translate:
             return translated_blocks, stats
         
-        # Translate with Typhoon in batches
-        batch_size = 5
+        # Translate with Typhoon in batches (reduced from 5 to 3 for better reliability)
+        batch_size = 3
         for i in range(0, len(to_translate), batch_size):
             batch = to_translate[i:i + batch_size]
             texts = [text for (_, _, text, _) in batch]
             
             print(f"   🐘 Typhoon Batch {i//batch_size + 1}: {len(texts)} blocks")
             
-            results = self.llm.translate_batch_typhoon(texts, target_lang, source_lang)
+            # ✅ Pass job_status and job_id for cancel support
+            results = self.llm.translate_batch_typhoon(texts, target_lang, source_lang, job_status, job_id)
             
             for j, (orig_idx, block, text, detected_lang) in enumerate(batch):
                 translated = results[j] if j < len(results) and results[j] else text
