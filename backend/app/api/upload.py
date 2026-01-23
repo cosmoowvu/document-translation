@@ -102,7 +102,7 @@ async def cleanup_all():
     """
     import shutil
     
-    deleted_count = {"uploads": 0, "outputs": 0}
+    deleted_count = {"uploads": 0, "outputs": 0, "cache": 0}
     errors = []
     
     try:
@@ -123,9 +123,11 @@ async def cleanup_all():
                     shutil.rmtree(item)
                     deleted_count["outputs"] += 1
                     
-        # Clear cache index as well
+        # ✅ Clear cache index as well
         from app.services.cache_service import clear_cache
         clear_cache()
+        deleted_count["cache"] = 1
+        print("🗑️ Cleared cache index")
         
     except Exception as e:
         errors.append(f"Output cleanup error: {str(e)}")

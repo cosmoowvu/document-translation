@@ -31,6 +31,12 @@ fileInput.addEventListener('change', (e) => {
     }
 });
 
+// Remove file button in file info bar
+document.getElementById('removeFileBtn').addEventListener('click', (e) => {
+    e.stopPropagation(); // Prevent upload area click event
+    removeFile();
+});
+
 // Handle File Upload
 async function handleFile(file) {
     // Validate file type
@@ -83,8 +89,8 @@ async function handleFile(file) {
     }
 }
 
-// Show File Preview - New UI
-function showFilePreview(file, uploadData) {
+// Show File Preview - New UI with large preview area and file info bar
+async function showFilePreview(file, uploadData) {
     // Show upload section (in case it was hidden)
     uploadSection.style.display = 'block';
     progressSection.classList.remove('active');
@@ -92,17 +98,69 @@ function showFilePreview(file, uploadData) {
     // Update upload area to show file
     uploadArea.classList.add('has-file');
 
-    // Hide upload content, show file display
+    // Hide upload content, show file preview section
     document.getElementById('uploadContent').classList.add('hidden');
-    document.getElementById('fileDisplay').classList.add('active');
+    document.getElementById('filePreviewSection').style.display = 'block';
 
-    // Display file info
-    document.getElementById('fileName').textContent = file.name;
-    document.getElementById('fileSize').textContent = formatFileSize(file.size);
+    // Update file info bar
+    document.getElementById('fileNameDisplay').textContent = file.name;
+    document.getElementById('fileSizeDisplay').textContent = formatFileSize(file.size);
 
-    // Enable translate button and show clear button
+    // Get preview elements
+    const imagePreview = document.getElementById('imagePreview');
+    const pdfPreview = document.getElementById('pdfPreview');
+    const pdfPages = document.getElementById('pdfPages');
+
+    // Clear previous previews
+    imagePreview.style.display = 'none';
+    pdfPreview.style.display = 'none';
+    pdfPages.innerHTML = '';
+
+    if (file.type.startsWith('image/')) {
+        // Image preview
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            imagePreview.src = e.target.result;
+            imagePreview.style.display = 'block';
+        };
+        reader.readAsDataURL(file);
+    } else if (file.type === 'application/pdf') {
+        // PDF multi-page preview
+        try {
+            if (typeof pdfjsLib !== 'undefined') {
+                const arrayBuffer = await file.arrayBuffer();
+                const pdf = await pdfjsLib.getDocument(arrayBuffer).promise;
+
+                // Render all pages
+                for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+                    const page = await pdf.getPage(pageNum);
+                    const canvas = document.createElement('canvas');
+                    canvas.className = 'pdf-page';
+
+                    const viewport = page.getViewport({ scale: 1.5 });
+                    canvas.width = viewport.width;
+                    canvas.height = viewport.height;
+
+                    const context = canvas.getContext('2d');
+                    await page.render({
+                        canvasContext: context,
+                        viewport: viewport
+                    }).promise;
+
+                    pdfPages.appendChild(canvas);
+                }
+
+                pdfPreview.style.display = 'block';
+            } else {
+                console.warn('PDF.js not loaded, cannot show PDF preview');
+            }
+        } catch (error) {
+            console.error('PDF preview error:', error);
+        }
+    }
+
+    // Enable translate button
     document.getElementById('translateBtn').classList.add('active');
-    document.getElementById('clearBtn').classList.add('active');
 }
 
 // Format file size
@@ -112,7 +170,7 @@ function formatFileSize(bytes) {
     return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
 }
 
-// Remove File - New UI
+// Remove File - Updated for new UI
 async function removeFile() {
     // Delete job files
     if (currentJobId) {
@@ -143,7 +201,7 @@ async function removeFile() {
     // Reset upload area UI
     uploadArea.classList.remove('has-file');
 
-    // Restore original upload content (fix skeleton loader issue)
+    // Restore original upload content HTML (in case skeleton loader was shown)
     const uploadContent = document.getElementById('uploadContent');
     uploadContent.innerHTML = `
         <div class="upload-icon">
@@ -156,9 +214,14 @@ async function removeFile() {
         <p class="supported-formats">รองรับ PDF, JPEG, PNG (สูงสุด 30MB)</p>
     `;
     uploadContent.classList.remove('hidden');
-    document.getElementById('fileDisplay').classList.remove('active');
+    document.getElementById('filePreviewSection').style.display = 'none';
+
+    // Clear previews
+    document.getElementById('imagePreview').style.display = 'none';
+    document.getElementById('imagePreview').src = '';
+    document.getElementById('pdfPreview').style.display = 'none';
+    document.getElementById('pdfPages').innerHTML = '';
 
     // Reset buttons
     document.getElementById('translateBtn').classList.remove('active');
-    document.getElementById('clearBtn').classList.remove('active');
 }

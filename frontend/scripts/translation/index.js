@@ -132,30 +132,95 @@ async function showResult() {
 
 // Cancel translation
 export async function cancelProcess() {
-    if (confirm('คุณต้องการยกเลิกกระบวนการแปลหรือไม่?')) {
+    // Show custom modal instead of browser confirm
+    const modal = document.getElementById('cancelModal');
+    const confirmStep = document.getElementById('cancelConfirmStep');
+    const progressStep = document.getElementById('cancelProgressStep');
+    const successStep = document.getElementById('cancelSuccessStep');
+
+    // Reset modal state
+    confirmStep.style.display = 'block';
+    progressStep.style.display = 'none';
+    successStep.style.display = 'none';
+
+    // Show modal
+    modal.classList.add('active');
+
+    // Make confirm function available globally
+    window.confirmCancel = async function () {
         const jobToCancel = currentJobId;
-        currentJobId = null;
 
-        if (jobToCancel) {
+        if (!jobToCancel) {
+            closeCancelModal();
+            return;
+        }
+
+        // Show loading step
+        confirmStep.style.display = 'none';
+        progressStep.style.display = 'block';
+
+        try {
+            // Send cancel request
+            await TranslationAPI.cancelJob(jobToCancel);
+            console.log('Cancel request sent for job:', jobToCancel);
+
+            // Poll until job is actually cancelled
+            await pollCancellationStatus(jobToCancel);
+
+            // Clear job
+            currentJobId = null;
+            localStorage.removeItem('translationState');
+
+            // Show success step
+            progressStep.style.display = 'none';
+            successStep.style.display = 'block';
+
+        } catch (error) {
+            console.error('Error cancelling job:', error);
+            // Still show success (best effort)
+            progressStep.style.display = 'none';
+            successStep.style.display = 'block';
+        }
+    };
+
+    // Polling function
+    async function pollCancellationStatus(jobId) {
+        const maxAttempts = 300; // 5 minutes safety limit (wait for real cancellation)
+        let attempts = 0;
+
+        console.log('⏳ Waiting for backend to confirm cancellation...');
+
+        while (attempts < maxAttempts) {
             try {
-                await TranslationAPI.cancelJob(jobToCancel);
-                console.log('Cancelled job:', jobToCancel);
+                const data = await TranslationAPI.pollStatus(jobId);
+
+                if (data.status === 'cancelled') {
+                    console.log('✅ Cancellation confirmed');
+                    // Wait 2 more seconds to ensure background stops
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                    return;
+                }
+
+                console.log(`Waiting... (${data.status}, attempt ${attempts + 1})`)
             } catch (error) {
-                console.error('Error cancelling job:', error);
+                // Might still be processing, keep waiting
+                console.log(`Polling... (attempt ${attempts + 1})`);
             }
+
+            // Wait 1 second before next check
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            attempts++;
         }
 
-        localStorage.removeItem('translationState');
-
-        // Call resetApp from global scope (utils.js)
-        if (typeof window.resetApp === 'function') {
-            window.resetApp();
-        } else {
-            // Fallback: reload page
-            window.location.reload();
-        }
+        console.log('Polling timeout - assuming cancelled');
     }
 }
+
+// Close cancel modal
+window.closeCancelModal = function () {
+    const modal = document.getElementById('cancelModal');
+    modal.classList.remove('active');
+};
 
 // Export current job ID getter/setter
 export function getCurrentJobId() {

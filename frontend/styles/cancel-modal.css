@@ -1,0 +1,121 @@
+/* Cancel Modal */
+.cancel-modal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.7);
+    z-index: 10000;
+    justify-content: center;
+    align-items: center;
+}
+
+.cancel-modal.active {
+    display: flex;
+}
+
+.cancel-modal-content {
+    background: white;
+    border-radius: 12px;
+    padding: 30px;
+    max-width: 450px;
+    width: 90%;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+    text-align: center;
+}
+
+.cancel-step h3 {
+    margin: 0 0 15px 0;
+    color: #333;
+    font-size: 1.4rem;
+}
+
+.cancel-step p {
+    margin: 0 0 25px 0;
+    color: #666;
+    font-size: 1rem;
+}
+
+.cancel-buttons {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+}
+
+.cancel-btn-primary,
+.cancel-btn-secondary {
+    padding: 12px 24px;
+    border: none;
+    border-radius: 6px;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.cancel-btn-primary {
+    background: linear-gradient(90deg, #e74c3c, #c0392b);
+    color: white;
+}
+
+.cancel-btn-primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(231, 76, 60, 0.3);
+}
+
+.cancel-btn-secondary {
+    background: #ecf0f1;
+    color: #555;
+}
+
+.cancel-btn-secondary:hover {
+    background: #bdc3c7;
+}
+
+/* Loading Spinner */
+.cancel-spinner {
+    width: 50px;
+    height: 50px;
+    border: 4px solid #f3f3f3;
+    border-top: 4px solid #10b981;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin: 0 auto 20px auto;
+}
+
+@keyframes spin {
+    0% {
+        transform: rotate(0deg);
+    }
+
+    100% {
+        transform: rotate(360deg);
+    }
+}
+
+/* Success Icon */
+.cancel-success-icon {
+    width: 70px;
+    height: 70px;
+    background: linear-gradient(90deg, #10b981, #059669);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 2.5rem;
+    color: white;
+    margin: 0 auto 20px auto;
+    animation: scaleIn 0.3s ease;
+}
+
+@keyframes scaleIn {
+    0% {
+        transform: scale(0);
+    }
+
+    100% {
+        transform: scale(1);
+    }
+}

@@ -17,20 +17,8 @@ function swapLanguages() {
     targetLang.value = sourceVal;
 }
 
-// Reset App
+// Reset App - Just reset UI, don't delete files
 async function resetApp() {
-    // Delete job files if exists
-    if (currentJobId) {
-        try {
-            await fetch(`${API_URL}/api/job/${currentJobId}`, {
-                method: 'DELETE'
-            });
-            console.log('Deleted job files for:', currentJobId);
-        } catch (error) {
-            console.error('Error deleting job:', error);
-        }
-    }
-
     // Clear state
     localStorage.removeItem('translationState');
     currentJobId = null;
@@ -38,6 +26,11 @@ async function resetApp() {
         window.setCurrentJobId(null);
     }
     fileInput.value = '';
+
+    // Stop process timer if running
+    if (window.TranslationUI) {
+        window.TranslationUI.stopTimer();
+    }
 
     // Reset UI sections
     uploadSection.style.display = 'block';
@@ -66,14 +59,36 @@ async function resetApp() {
 
     // Reset buttons
     document.getElementById('translateBtn').classList.remove('active');
-    document.getElementById('clearBtn').classList.remove('active');
 }
 
 // Clear all files (manual cleanup)
 async function clearAllFiles() {
-    if (!confirm('ต้องการลบไฟล์ทั้งหมดบน Server หรือไม่?\n\n(ไฟล์อัปโหลดและผลแปลทั้งหมดจะถูกลบ)')) {
-        return;
-    }
+    // Show custom modal
+    const modal = document.getElementById('clearFilesModal');
+    modal.classList.add('active');
+}
+
+// Close clear files modal
+window.closeClearFilesModal = function () {
+    const modal = document.getElementById('clearFilesModal');
+    const confirmStep = document.getElementById('clearFilesConfirmStep');
+    const successStep = document.getElementById('clearFilesSuccessStep');
+
+    // Reset modal state
+    confirmStep.style.display = 'block';
+    successStep.style.display = 'none';
+
+    modal.classList.remove('active');
+};
+
+// Confirm clear all files
+window.confirmClearFiles = async function () {
+    const confirmStep = document.getElementById('clearFilesConfirmStep');
+    const successStep = document.getElementById('clearFilesSuccessStep');
+    const messageEl = document.getElementById('clearFilesMessage');
+
+    // Hide confirm step
+    confirmStep.style.display = 'none';
 
     try {
         const response = await fetch(`${API_URL}/api/cleanup`, {
@@ -83,13 +98,19 @@ async function clearAllFiles() {
         if (response.ok) {
             const data = await response.json();
             const totalDeleted = (data.deleted_count?.uploads || 0) + (data.deleted_count?.outputs || 0);
-            alert(`✅ ลบไฟล์เรียบร้อย\n\nลบไปทั้งหมด ${totalDeleted} รายการ`);
-            resetApp();
+
+            // Show success in modal
+            messageEl.textContent = `ลบไฟล์ทั้งหมด ${totalDeleted} รายการ`;
+            successStep.style.display = 'block';
         } else {
-            alert('❌ ไม่สามารถลบไฟล์ได้');
+            // Show error
+            messageEl.textContent = 'ไม่สามารถลบไฟล์ได้';
+            successStep.style.display = 'block';
         }
     } catch (error) {
         console.error('Error clearing files:', error);
-        alert('❌ เกิดข้อผิดพลาด: ' + error.message);
+        // Show error in modal
+        messageEl.textContent = error.message;
+        successStep.style.display = 'block';
     }
-}
+};

@@ -5,7 +5,42 @@ Optimized for Thai ↔ English translation
 """
 import requests
 import re
-from typing import List
+from typing import List, Tuple
+
+
+def remove_duplicate_blocks(response_text: str) -> Tuple[str, int]:
+    """
+    ตรวจสอบและลบ duplicate ###BLOCKn### markers ออกจาก response
+    Returns: (cleaned_response, num_duplicates_removed)
+    """
+    # หา all blocks ที่มีใน response
+    block_pattern = r'(###BLOCK\d+###.*?)(?=###BLOCK\d+###|$)'
+    all_blocks = re.findall(block_pattern, response_text, re.DOTALL)
+    
+    if not all_blocks:
+        return response_text, 0
+    
+    # Track unique blocks by block number
+    seen_blocks = {}
+    duplicates = 0
+    
+    for block in all_blocks:
+        # Extract block number
+        num_match = re.search(r'###BLOCK(\d+)###', block)
+        if num_match:
+            block_num = int(num_match.group(1))
+            if block_num not in seen_blocks:
+                seen_blocks[block_num] = block
+            else:
+                duplicates += 1
+    
+    # Reconstruct response with unique blocks only (in order)
+    if duplicates > 0:
+        sorted_blocks = [seen_blocks[num] for num in sorted(seen_blocks.keys())]
+        cleaned = '\n'.join(sorted_blocks)
+        return cleaned, duplicates
+    
+    return response_text, 0
 
 
 def translate_batch_typhoon(
@@ -79,11 +114,22 @@ def translate_batch_typhoon(
             if resp.status_code == 200:
                 response_text = resp.json().get("response", "").strip()
                 
-                # Extract translations using regex
+                # ✅ Debug: Check for duplicate blocks
+                if '###BLOCK1###' in response_text:
+                    block1_count = response_text.count('###BLOCK1###')
+                    if block1_count > 1:
+                        print(f"   🔍 DEBUG: Found {block1_count} occurrences of BLOCK1 in response")
+                
+                # ✅ Remove duplicate blocks before parsing
+                cleaned_response, num_duplicates = remove_duplicate_blocks(response_text)
+                if num_duplicates > 0:
+                    print(f"   ⚠️ Removed {num_duplicates} duplicate blocks from Typhoon response")
+                
+                # Extract translations using regex from cleaned response
                 results = [""] * len(texts)
                 missing_blocks = []
                 for i in range(len(texts)):
-                    match = re.search(rf"###BLOCK{i+1}###\s*(.*?)(?=\s*###BLOCK{i+2}###|$)", response_text, re.DOTALL)
+                    match = re.search(rf"###BLOCK{i+1}###\s*(.*?)(?=\s*###BLOCK{i+2}###|$)", cleaned_response, re.DOTALL)
                     if match:
                         block_content = match.group(1).strip()
                         # Clean up common prefixes/suffixes from LLM

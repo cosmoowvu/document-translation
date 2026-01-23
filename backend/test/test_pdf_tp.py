@@ -451,7 +451,7 @@ def process_page(image_path: str, output_path: str,
                  src_lang: str, tgt_lang: str, width: int, height: int):
     """ประมวลผลหน้าเดียว"""
     
-    print("   🔍 OCR (PaddleOCR)...")
+    print("    OCR (PaddleOCR)...")
     elements = extract_text_with_paddle(image_path)
     merged_elements = group_elements_by_line(elements)
     

@@ -8,8 +8,55 @@ import { TranslationAPI } from './api.js';
 
 // Export UI functions
 export const TranslationUI = {
+    timerInterval: null,
+
+    // Start process timer
+    startTimer() {
+        if (this.timerInterval) return;
+
+        // Get or set start time (persist across reloads)
+        let startTime = localStorage.getItem('processStartTime');
+        if (!startTime) {
+            startTime = Date.now();
+            localStorage.setItem('processStartTime', startTime);
+        }
+
+        const timerEl = document.getElementById('processTimer');
+
+        const update = () => {
+            if (!timerEl) return;
+
+            const now = Date.now();
+            const elapsed = Math.max(0, Math.floor((now - parseInt(startTime)) / 1000));
+
+            let timeText = `${elapsed}s`;
+            if (elapsed >= 60) {
+                const mins = Math.floor(elapsed / 60);
+                const secs = elapsed % 60;
+                timeText = `${mins}m ${secs}s`;
+            }
+
+            timerEl.textContent = ` - ⏱ ${timeText}`;
+        };
+
+        update(); // Initial update
+        this.timerInterval = setInterval(update, 1000);
+    },
+
+    // Stop process timer
+    stopTimer() {
+        if (this.timerInterval) {
+            clearInterval(this.timerInterval);
+            this.timerInterval = null;
+        }
+        localStorage.removeItem('processStartTime');
+    },
+
     // Show progress with step indicators
     showProgress(message, percent) {
+        // Start timer if not running
+        this.startTimer();
+
         const uploadSection = document.getElementById('uploadSection');
         const errorSection = document.getElementById('errorSection');
         const resultSection = document.getElementById('resultSection');
@@ -43,11 +90,11 @@ export const TranslationUI = {
         }
 
         // Dynamic label for extraction
-        const fileName = document.getElementById('fileName').textContent.trim();
+        const fileName = document.getElementById('fileNameDisplay').textContent.trim();
         if (fileName.toLowerCase().endsWith('.pdf')) {
-            stepExtract.textContent = '📖 ดึงข้อความ';
+            stepExtract.textContent = 'ดึงข้อความ';
         } else {
-            stepExtract.textContent = '📖 OCR';
+            stepExtract.textContent = 'OCR';
         }
 
         // Reset all steps
@@ -126,6 +173,7 @@ export const TranslationUI = {
 
     // Show error
     showError(message) {
+        this.stopTimer();
         localStorage.removeItem('translationState');
 
         const uploadSection = document.getElementById('uploadSection');
@@ -146,6 +194,7 @@ export const TranslationUI = {
 
     // Show result view
     async showResult(jobId) {
+        this.stopTimer();
         const uploadSection = document.getElementById('uploadSection');
         const progressSection = document.getElementById('progressSection');
         const errorSection = document.getElementById('errorSection');
@@ -324,20 +373,25 @@ export const TranslationUI = {
             // OCR Engine Badge
             if (statusData.stats && statusData.stats.ocr_engine) {
                 const ocrEngine = statusData.stats.ocr_engine;
-                let ocrName, ocrEmoji;
+                let ocrName;
 
-                if (ocrEngine === 'paddleocr') {
+                // ✅ Use .includes() to catch variants like "paddleocr (fallback)", "typhoon-api (auto)", etc.
+                if (ocrEngine.includes('paddleocr') || ocrEngine.includes('paddle')) {
                     ocrName = 'PaddleOCR';
-                    ocrEmoji = '🏓';
-                } else if (ocrEngine === 'typhoon' || ocrEngine === 'typhoon-api') {
+
+                } else if (ocrEngine.includes('typhoon')) {
                     ocrName = 'Typhoon OCR';
-                    ocrEmoji = '🌪️';
-                } else {
+
+                } else if (ocrEngine.includes('docling')) {
                     ocrName = 'Docling';
-                    ocrEmoji = '📘';
+
+                } else {
+                    // Fallback for unknown engines
+                    ocrName = ocrEngine;
+
                 }
 
-                ocrBadge = `<span class="badge" style="background-color: #fff3e0; color: #e65100; padding: 4px 8px; border-radius: 4px; font-size: 0.8rem;">${ocrEmoji} ${ocrName}</span>`;
+                ocrBadge = `<span class="badge" style="background-color: #fff3e0; color: #e65100; padding: 4px 8px; border-radius: 4px; font-size: 0.8rem;">📸 ${ocrName}</span>`;
             }
 
         } catch (e) {

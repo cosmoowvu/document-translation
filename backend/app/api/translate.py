@@ -77,12 +77,37 @@ async def translate_document(
         success, output_path = copy_cached_result(cached_job_id, job_id)
         
         if success:
+            # ✅ Load stats from cached job
+            stats = {}
+            cached_stats_file = settings.OUTPUT_DIR / cached_job_id / "logs" / "stats.json"
+            if cached_stats_file.exists():
+                try:
+                    import json
+                    with open(cached_stats_file, "r", encoding="utf-8") as f:
+                        raw_stats = json.load(f)
+                    # Format stats to match frontend expectations
+                    stats = {
+                        "ocr_seconds": raw_stats.get("timings", {}).get("ocr_seconds", 0),
+                        "translate_seconds": raw_stats.get("timings", {}).get("translation_seconds", 0),
+                        "render_seconds": raw_stats.get("timings", {}).get("render_seconds", 0),
+                        "total_seconds": raw_stats.get("timings", {}).get("total_seconds", 0),
+                        "blocks_translated": raw_stats.get("blocks", {}).get("translated", 0),
+                        "blocks_skipped": raw_stats.get("blocks", {}).get("skipped", 0),
+                        "languages": raw_stats.get("languages", {}),
+                        "ocr_engine": raw_stats.get("ocr_engine", "docling"),
+                        "translation_mode": raw_stats.get("translation_mode", "qwen_direct")
+                    }
+                    print(f"   📊 Loaded stats from cache: OCR={stats.get('ocr_engine')}, Time={stats.get('total_seconds')}s")
+                except Exception as e:
+                    print(f"   ⚠️ Error loading cached stats: {e}")
+            
             job_status[job_id] = {
                 "status": "completed",
                 "progress": 100,
                 "message": "ใช้ผลลัพธ์ที่เคยแปลไว้ (cached)",
                 "output_path": output_path,
-                "cached": True
+                "cached": True,
+                "stats": stats  # ✅ Include stats
             }
             
             return TranslateResponse(

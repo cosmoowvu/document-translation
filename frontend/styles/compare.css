@@ -46,7 +46,7 @@
     color: white;
 }
 
-.compare-panel.ocr .header {
+.compare-panel.text-panel .header {
     background: linear-gradient(90deg, #10b981, #059669);
     color: white;
 }
@@ -54,7 +54,7 @@
 .compare-panel .preview {
     padding: 10px;
     flex: 1;
-    background-color: #1a1a2e;
+    background-color: #d8eed9;
     overflow-y: auto;
     display: flex;
     flex-direction: column;
@@ -99,12 +99,13 @@
 /* OCR Page Header */
 .ocr-page-header {
     text-align: center;
-    padding: 12px 20px;
-    font-size: 1rem;
+    padding: 8px 16px;
+    font-size: 0.9rem;
     font-weight: 500;
-    color: #333;
-    background: #ffffff;
-    border-bottom: 1px solid #e5e5e5;
+    color: #666;
+    background: #f5f5f5;
+    border-radius: 4px;
+    margin-bottom: 8px;
 }
 
 /* Combined Block Layout (Card-based) */

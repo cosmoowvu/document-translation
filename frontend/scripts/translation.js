@@ -101,11 +101,11 @@ function showProgress(message, percent) {
     }
 
     // Dynamic Label for Extraction
-    const fileName = document.getElementById('fileName').textContent.trim();
+    const fileName = document.getElementById('fileNameDisplay').textContent.trim();
     if (fileName.toLowerCase().endsWith('.pdf')) {
-        stepExtract.textContent = '📖 ดึงข้อความ';
+        stepExtract.textContent = 'ดึงข้อความ';
     } else {
-        stepExtract.textContent = '📖 OCR';
+        stepExtract.textContent = 'OCR';
     }
 
     // Reset all steps
