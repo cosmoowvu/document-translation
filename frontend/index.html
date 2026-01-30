@@ -32,7 +32,7 @@
         <!-- Header -->
         <header>
             <h1>Document Translation - แปลเอกสาร</h1>
-            <p>อัปโหลดไฟล์ PDF, JPEG หรือ PNG และแปลภาษาทันที</p>
+            <p>อัปโหลดไฟล์ PDF, JPEG หรือ PNG เพื่อแปลภาษา</p>
         </header>
 
         <!-- Upload Section -->
@@ -42,8 +42,9 @@
                 <div class="form-group">
                     <label>ภาษาต้นฉบับ</label>
                     <select id="sourceLang">
-                        <option value="tha_Thai">ไทย</option>
+                        <option value="tha_Thai" selected>ไทย</option>
                         <option value="eng_Latn">อังกฤษ</option>
+                        <option value="auto">ตรวจหาภาษาอัตโนมัติ (Auto Detect)</option>
                     </select>
                 </div>
 
@@ -64,6 +65,20 @@
             <!-- Row 2: Translation Mode & OCR Engine -->
             <div class="language-row" style="margin-bottom: 24px;">
                 <div class="form-group">
+                    <label>OCR Engine</label>
+                    <select id="ocrEngine">
+                        <option value="default" selected>Default</option>
+                        <option value="docling">Docling (EasyOCR)</option>
+                        <option value="paddleocr">PaddleOCR</option>
+                        <option value="typhoon">Typhoon OCR (Cloud)</option>
+                    </select>
+
+                </div>
+
+                <!-- Spacer (same width as swap button) -->
+                <div style="width: 48px;"></div>
+
+                <div class="form-group">
                     <label>โหมดการแปล</label>
                     <select id="translationModel">
                         <option value="typhoon_direct">Typhoon (Direct)</option>
@@ -72,19 +87,6 @@
                         <option value="nllb_qwen">NLLB → Qwen 2.5</option>
                         <option value="nllb_gemma">NLLB → Gemma 2</option>
                         <option value="nllb_llama">NLLB → Llama 3.2</option>
-                    </select>
-                </div>
-
-                <!-- Spacer (same width as swap button) -->
-                <div style="width: 48px;"></div>
-
-                <div class="form-group">
-                    <label>OCR Engine</label>
-                    <select id="ocrEngine">
-                        <option value="default" selected>Default</option>
-                        <option value="docling">Docling (EasyOCR)</option>
-                        <option value="paddleocr">PaddleOCR</option>
-                        <option value="typhoon">Typhoon OCR (Cloud)</option>
                     </select>
                 </div>
             </div>
@@ -203,15 +205,22 @@
                         <!-- Will be populated by JS -->
                     </div>
                 </div>
-                <button class="sync-toggle-btn" id="syncToggleBtn" onclick="toggleSyncScroll()" title="เลื่อนพร้อมกัน">
-                    🔗 Sync Scroll: OFF
-                </button>
+                <div style="display: flex; gap: 10px;">
+                    <button class="sync-toggle-btn dropdown-btn" onclick="openCompareModal()"
+                        title="เปรียบเทียบรายละเอียด">
+                        🔎 Compare
+                    </button>
+                    <button class="sync-toggle-btn" id="syncToggleBtn" onclick="toggleSyncScroll()"
+                        title="เลื่อนพร้อมกัน">
+                        🔗 Sync Scroll: OFF
+                    </button>
+                </div>
             </div>
             <div class="compare-container active">
                 <!-- Column 1: Original File -->
                 <div class="compare-panel original">
                     <div class="header">
-                        📄 ต้นฉบับ
+                        📄 ไฟล์ต้นฉบับ (Original)
                         <button class="fullscreen-btn" onclick="openFullscreen('original')"
                             title="ดูเต็มหน้าจอ">⛶</button>
                     </div>
@@ -220,20 +229,10 @@
                     </div>
                 </div>
 
-                <!-- Column 2: OCR + Translated Text (Combined) -->
-                <div class="compare-panel text-panel">
-                    <div class="header">
-                        🔍 ข้อความการแปลภาษา
-                    </div>
-                    <div class="preview text-combined" id="textCombinedPreview">
-                        <p style="color: #999; padding: 20px; text-align: center;">กำลังโหลด...</p>
-                    </div>
-                </div>
-
-                <!-- Column 3: Translated File -->
+                <!-- Column 2: Translated File -->
                 <div class="compare-panel translated">
                     <div class="header">
-                        🌐 แปลแล้ว
+                        🌐 ไฟล์แปล (Translated)
                         <button class="fullscreen-btn" onclick="openFullscreen('translated')"
                             title="ดูเต็มหน้าจอ">⛶</button>
                     </div>
@@ -265,7 +264,7 @@
                     <span>JPG</span>
                 </a>
             </div>
-            <button class="reset-btn" onclick="resetApp()">🔄 แปลใหม่</button>
+            <button class="reset-btn" onclick="resetApp()">กลับไปหน้าแรก</button>
         </div>
 
         <!-- Footer -->
@@ -347,6 +346,40 @@
         </div>
     </div>
 
+    <!-- Detailed Compare Modal -->
+    <div class="compare-modal-overlay" id="compareModal" style="display: none;">
+        <div class="compare-modal-content">
+            <button class="close-btn" onclick="closeCompareModal()">✕</button>
+
+            <div class="compare-modal-body">
+                <!-- Left Column: Viewer -->
+                <div class="compare-column left-viewer">
+                    <div class="column-header">
+                        <select id="compareViewSelect" onchange="switchCompareView()">
+                            <option value="original">📄 ไฟล์ต้นฉบับ (Original)</option>
+                            <option value="translated">🌐 ไฟล์แปล (Translated)</option>
+                        </select>
+                    </div>
+                    <div class="column-content" id="compareViewerContent">
+                        <!-- Image/PDF will be loaded here -->
+                        <div class="placeholder-text">กำลังโหลด...</div>
+                    </div>
+                </div>
+
+                <!-- Right Column: Text Cards -->
+                <div class="compare-column right-cards">
+                    <div class="column-header">
+                        <span>📝ข้อความที่ดึงมาและข้อความที่แปลแล้ว</span>
+                    </div>
+                    <div class="column-content" id="compareCardsContent">
+                        <!-- Text Cards will be injected here -->
+                        <div class="placeholder-text">กำลังโหลดข้อมูล...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Scripts (order matters!) -->
     <script src="scripts/main.js"></script>
     <script src="scripts/utils.js"></script>
@@ -369,9 +402,33 @@
 
         // Initialize on load
         const urlParams = new URLSearchParams(window.location.search);
-        const jobId = urlParams.get('job') || generateUUID();
+        let jobId = urlParams.get('job');
+
+        // If no URL param, try to recover from localStorage
+        if (!jobId) {
+            try {
+                const savedState = localStorage.getItem('translationState');
+                if (savedState) {
+                    const state = JSON.parse(savedState);
+                    if (state.jobId) {
+                        jobId = state.jobId;
+                        console.log('🔄 Restoring Job ID from storage:', jobId);
+                    }
+                }
+            } catch (e) {
+                console.error('Error reading storage:', e);
+            }
+        }
+
+        // If still no ID, generate new one
+        if (!jobId) {
+            jobId = generateUUID();
+            console.log('✨ Generated new Job ID:', jobId);
+        }
+
         setCurrentJobId(jobId);
-        initTranslation(jobId);
+        // Delay init slightly to ensure DOM is ready
+        setTimeout(() => initTranslation(jobId), 50);
 
         // Expose to global scope for onclick handlers
         // Wrap async function for onclick compatibility
@@ -384,6 +441,11 @@
         window.cancelProcess = cancelProcessModule;
         window.setCurrentJobId = setCurrentJobId;
         window.TranslationUI = TranslationUI;
+
+        // Expose Compare Modal functions
+        window.openCompareModal = () => TranslationUI.openCompareModal(window.currentJobId);
+        window.closeCompareModal = () => TranslationUI.closeCompareModal();
+        window.switchCompareView = () => TranslationUI.switchCompareView(window.currentJobId);
 
         // Set global job ID for other scripts (for backward compatibility)
         window.currentJobId = jobId;

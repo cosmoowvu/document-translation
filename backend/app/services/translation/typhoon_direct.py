@@ -101,18 +101,24 @@ def translate_batch_typhoon(
     for attempt in range(max_retries + 1):
         try:
             resp = requests.post(
-                ollama_url,  # Already has /api/generate from llm_service.url
+                ollama_url,
                 json={
                     "model": model_name,
                     "prompt": prompt,
                     "stream": False,
-                    "options": {"temperature": 0.1, "num_predict": 4096}
+                    "options": {
+                        "temperature": 0.6,  #ควบคุมการสุ่มสำหรับการตอบกลับที่สร้างสรรค์มากขึ้น
+                        "repeat_penalty": 1.05, #ป้องกันข้อความซ้ำซาก
+                        "num_predict": 4096,  #ควบคุมจำนวนคำที่จะสร้าง
+                        "top_p": 0.9          #ควบคุมความหลากหลายของการตอบกลับ
+                    }
                 },
-                timeout=180
+                timeout=300  # ✅ Increased from 180s to 300s (5 min) for cold boot
             )
             
             if resp.status_code == 200:
                 response_text = resp.json().get("response", "").strip()
+                # ... (rest of success logic) ...
                 
                 # ✅ Debug: Check for duplicate blocks
                 if '###BLOCK1###' in response_text:
@@ -120,11 +126,11 @@ def translate_batch_typhoon(
                     if block1_count > 1:
                         print(f"   🔍 DEBUG: Found {block1_count} occurrences of BLOCK1 in response")
                 
-                # ✅ Remove duplicate blocks before parsing
+                # ✅ Remove duplicate blocks before parsing (moved logic here for cleaner flow)
                 cleaned_response, num_duplicates = remove_duplicate_blocks(response_text)
                 if num_duplicates > 0:
                     print(f"   ⚠️ Removed {num_duplicates} duplicate blocks from Typhoon response")
-                
+
                 # Extract translations using regex from cleaned response
                 results = [""] * len(texts)
                 missing_blocks = []
@@ -155,11 +161,30 @@ def translate_batch_typhoon(
                     print(f"   ⚠️ Typhoon: {len(missing_blocks)}/{len(texts)} blocks fell back to original")
                 
                 return results
+
+            elif resp.status_code in [500, 503]:
+                # ✅ Handle Model Loading Error specifically
+                import time
+                error_msg = resp.text
+                print(f"   ⏳ Server busy/loading ({resp.status_code}): {error_msg}")
+                if "loading model" in error_msg.lower() or "busy" in error_msg.lower():
+                    wait_time = 20 * (attempt + 1)
+                    print(f"   💤 Waiting {wait_time}s for model to load...")
+                    time.sleep(wait_time)
+                    continue # Retry
+                else:
+                    print(f"   ❌ API Error: {resp.status_code} - {resp.text}")
             else:
-                print(f"   ❌ API Error: {resp.status_code} - {resp.text}")
-                
+                 print(f"   ❌ API Error: {resp.status_code} - {resp.text}")
+
         except Exception as e:
             print(f"⚠️ Typhoon error (attempt {attempt + 1}/{max_retries + 1}): {e}")
+            if "ReadTimeout" in str(e) or "ConnectTimeout" in str(e):
+                 # Timeout usually means model is stuck loading big context or just slow
+                 print(f"   💤 Timeout hit. Waiting 10s before retry...")
+                 import time
+                 time.sleep(10)
+            
             if attempt < max_retries:
                 print(f"   🔄 Retrying...")
                 continue

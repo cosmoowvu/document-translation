@@ -357,9 +357,9 @@ class TyphoonOCRService:
                 page_width = (img.width / dpi) * 72
                 page_height = (img.height / dpi) * 72
                 
-                print(f"   📐 Image dimensions: {img.width}x{img.height}px @ {dpi} DPI → {page_width:.1f}x{page_height:.1f} points")
+                print(f"   📐 Image dimensions: {img.width}x{img.height}px @ {dpi} DPI → {float(page_width):.1f}x{float(page_height):.1f} points")
         
-        print(f"   📄 Processing {num_pages} page(s)... ({page_width:.1f}x{page_height:.1f} points)")
+        print(f"   📄 Processing {num_pages} page(s)... ({float(page_width):.1f}x{float(page_height):.1f} points)")
         
         # Process each page
         pages = {}
@@ -368,10 +368,20 @@ class TyphoonOCRService:
             
             try:
                 # Call Typhoon OCR API
+                # ✅ Force base_url to Cloud API
+                # ✅ Use task_type="v1.5" for stricter extraction (prevents solving the homework)
+                # But remove <figure> tags manually
                 markdown_text = ocr_document(
                     pdf_or_image_path=file_path,
-                    page_num=page_no
+                    page_num=page_no,
+                    base_url="https://api.opentyphoon.ai/v1",
+                    task_type="v1.5"
                 )
+                
+                # 🧹 Remove <figure> tags (image descriptions)
+                if markdown_text:
+                    import re
+                    markdown_text = re.sub(r'<figure>.*?</figure>', '', markdown_text, flags=re.DOTALL).strip()
                 
                 print(f"   ✅ Page {page_no}: Extracted {len(markdown_text)} characters")
                 
@@ -499,7 +509,7 @@ class OCRService:
                         print(f"⚠️ Typhoon OCR not configured: {e}")
                         print(f"🔄 Falling back to Docling...")
                         result = self._docling.process_document(file_path, source_lang)
-                        result["ocr_engine"] = "docling (typhoon not configured)"
+                        result["ocr_engine"] = "Docling (Fallback)"
                         return result
                 
                 # Try Typhoon OCR
@@ -508,10 +518,12 @@ class OCRService:
                     result["ocr_engine"] = "typhoon-api (auto)"
                     return result
                 except Exception as e:
+                    import traceback
+                    traceback.print_exc()
                     print(f"⚠️ Typhoon OCR failed: {e}")
                     print(f"🔄 Falling back to Docling...")
                     result = self._docling.process_document(file_path, source_lang)
-                    result["ocr_engine"] = "docling (fallback from typhoon)"
+                    result["ocr_engine"] = "Docling (Fallback)"
                     return result
             else:
                 # Unknown file type -> fallback to Docling
@@ -532,7 +544,7 @@ class OCRService:
                     print(f"⚠️ Typhoon OCR not configured: {e}")
                     print(f"🔄 Falling back to Docling...")
                     result = self._docling.process_document(file_path, source_lang)
-                    result["ocr_engine"] = "docling (typhoon not configured)"
+                    result["ocr_engine"] = "Docling (Fallback)"
                     return result
             
             # Try Typhoon OCR
@@ -542,7 +554,7 @@ class OCRService:
                 print(f"⚠️ Typhoon OCR failed: {e}")
                 print(f"🔄 Falling back to Docling...")
                 result = self._docling.process_document(file_path, source_lang)
-                result["ocr_engine"] = "docling (fallback from typhoon)"
+                result["ocr_engine"] = "Docling (Fallback)"
                 return result
         
         elif ocr_engine == "paddleocr":
@@ -552,7 +564,7 @@ class OCRService:
                 print(f"⚠️ PaddleOCR failed: {e}")
                 print(f"🔄 Falling back to Docling...")
                 result = self._docling.process_document(file_path, source_lang)
-                result["ocr_engine"] = "docling (fallback)"
+                result["ocr_engine"] = "Docling (Fallback)"
                 return result
         else:
             return self._docling.process_document(file_path, source_lang)

@@ -5,7 +5,7 @@
 /* Compare View - 3 Column Grid */
 .compare-container {
     display: none;
-    grid-template-columns: 1fr 1fr 1fr;
+    grid-template-columns: 1fr 1fr;
     gap: 20px;
     height: 800px;
 }
@@ -238,4 +238,157 @@
 
 .combined-block.table-header .block-label {
     background: linear-gradient(90deg, #f59e0b, #d97706);
+}
+
+/* ===================================
+   Detailed Compare Modal
+   =================================== */
+.compare-modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.8);
+    z-index: 2000;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    backdrop-filter: blur(5px);
+}
+
+.compare-modal-content {
+    background: white;
+    width: 95%;
+    height: 90%;
+    border-radius: 12px;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    position: relative;
+    animation: modalSlideUp 0.3s ease-out;
+}
+
+@keyframes modalSlideUp {
+    from {
+        transform: translateY(20px);
+        opacity: 0;
+    }
+
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+.compare-modal-content .close-btn {
+    position: absolute;
+    top: 15px;
+    right: 15px;
+    background: #f1f1f1;
+    border: none;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    font-size: 1.2rem;
+    cursor: pointer;
+    color: #555;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+}
+
+.compare-modal-content .close-btn:hover {
+    background: #e74c3c;
+    color: white;
+}
+
+.compare-modal-body {
+    display: flex;
+    height: 100%;
+    width: 100%;
+}
+
+.compare-column {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid #eee;
+    height: 100%;
+}
+
+.compare-column:last-child {
+    border-right: none;
+}
+
+.column-header {
+    padding: 15px 20px;
+    background: #f8f9fa;
+    border-bottom: 1px solid #eee;
+    font-weight: 600;
+    color: #333;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 60px;
+}
+
+.column-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+    background: #f9fafb;
+    position: relative;
+}
+
+/* Dropdown specific style */
+#compareViewSelect {
+    padding: 6px 12px;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    font-size: 0.95rem;
+    color: #374151;
+    background-color: white;
+    cursor: pointer;
+    outline: none;
+    min-width: 200px;
+}
+
+#compareViewSelect:focus {
+    border-color: #10b981;
+    box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.1);
+}
+
+/* Viewer Content */
+#compareViewerContent {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    background: #eef2f6;
+    /* Contrasting background for pages */
+}
+
+#compareViewerContent img {
+    max-width: 100%;
+    height: auto;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+    margin-bottom: 20px;
+}
+
+/* Card Content Override for Modal */
+#compareCardsContent .ocr-page-header {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.placeholder-text {
+    color: #9ca3af;
+    text-align: center;
+    margin-top: 50px;
+    font-size: 1.1rem;
 }

@@ -95,7 +95,8 @@ async def translate_document(
                         "blocks_skipped": raw_stats.get("blocks", {}).get("skipped", 0),
                         "languages": raw_stats.get("languages", {}),
                         "ocr_engine": raw_stats.get("ocr_engine", "docling"),
-                        "translation_mode": raw_stats.get("translation_mode", "qwen_direct")
+                        "translation_mode": raw_stats.get("translation_mode", "qwen_direct"),
+                        "detected_language": raw_stats.get("detected_language") # ✅ Add detected language
                     }
                     print(f"   📊 Loaded stats from cache: OCR={stats.get('ocr_engine')}, Time={stats.get('total_seconds')}s")
                 except Exception as e:
@@ -187,7 +188,8 @@ async def get_status(job_id: str):
                         "blocks_skipped": raw_stats.get("blocks", {}).get("skipped", 0),
                         "languages": raw_stats.get("languages", {}),
                         "ocr_engine": raw_stats.get("ocr_engine", "docling"),  # ✅ Add OCR engine
-                        "translation_mode": raw_stats.get("translation_mode", "qwen_direct")  # ✅ Add translation mode
+                        "translation_mode": raw_stats.get("translation_mode", "qwen_direct"),  # ✅ Add translation mode
+                        "detected_language": raw_stats.get("detected_language") # ✅ Add detected language
                     }
                 except Exception as e:
                     print(f"Error loading stats: {e}")
@@ -206,7 +208,13 @@ async def get_status(job_id: str):
     if not job_dir.exists():
         raise HTTPException(status_code=404, detail="Job not found")
     
-    return {"job_id": job_id, "status": "pending", "progress": 0}
+    # ✅ ถ้ามีไฟล์แต่ไม่มีใน memory และไม่มี output = งานหลุดไประหว่าง server restart
+    return {
+        "job_id": job_id, 
+        "status": "error", 
+        "progress": 0,
+        "message": "กระบวนการถูกขัดจังหวะ (Server Restart) กรุณาเริ่มใหม่"
+    }
 
 
 @router.delete("/cancel/{job_id}")

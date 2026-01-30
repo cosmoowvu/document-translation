@@ -38,6 +38,15 @@ window.addEventListener('DOMContentLoaded', async () => {
     // Initialize drag pan for modal
     initDragPan();
 
+    // Initialize Swap Button State
+    if (window.updateSwapButtonState) {
+        window.updateSwapButtonState();
+        const sourceLang = document.getElementById('sourceLang');
+        if (sourceLang) {
+            sourceLang.addEventListener('change', window.updateSwapButtonState);
+        }
+    }
+
     // Note: State restoration is now handled by translation module
     // This event listener kept for modal initialization only
 });

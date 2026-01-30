@@ -64,6 +64,61 @@ class LLMService:
         }
         return lang_names.get(lang_code, lang_code)
     
+    def detect_language(self, text: str) -> str:
+        """
+        Detect language using LLM (More robust than regex)
+        """
+        if not text or len(text.strip()) < 5:
+            return "eng_Latn"
+            
+        prompt = (
+            "Identify the language of the following text.\n"
+            "Return ONLY the standardized code from this list:\n"
+            "- eng_Latn (English)\n"
+            "- tha_Thai (Thai)\n"
+            "- jpn_Jpan (Japanese)\n"
+            "- zho_Hans (Chinese)\n"
+            "- kor_Hang (Korean)\n\n"
+            "If unsure, return 'eng_Latn'.\n"
+            "Do not explain. Return ONLY the code.\n\n"
+            f"Text: \"{text[:500]}\""
+        )
+        
+        try:
+            print(f"   🔍 Asking LLM to detect language...")
+            resp = requests.post(
+                self.url,
+                json={
+                    "model": self.model,
+                    "prompt": prompt,
+                    "stream": False,
+                    "options": {"temperature": 0.1, "num_predict": 10}
+                },
+                timeout=30
+            )
+            
+            if resp.status_code == 200:
+                result = resp.json().get("response", "").strip()
+                # Clean up response
+                match = re.search(r'([a-z]{3}_[A-Za-z]{4})', result)
+                if match:
+                    return match.group(1)
+                
+                # Fallback mapping if LLM returns name
+                result_lower = result.lower()
+                if "thai" in result_lower: return "tha_Thai"
+                if "japan" in result_lower: return "jpn_Jpan"
+                if "chin" in result_lower: return "zho_Hans"
+                if "korea" in result_lower: return "kor_Hang"
+                
+                return "eng_Latn"
+            else:
+                print(f"   ⚠️ Detect Lang API Error: {resp.status_code}")
+        except Exception as e:
+            print(f"   ⚠️ Detect Lang Error: {e}")
+            
+        return "eng_Latn"
+    
     def translate_batch_llm(self, texts: List[str], target_lang: str, src_lang: str = "tha_Thai") -> List[str]:
         """
         แปล batch (รองรับทุก LLM: Qwen, Gemma, Llama)
@@ -89,6 +144,7 @@ class LLMService:
         # Generic Batch Prompt (works for all models)
         prompt = (
             f"Translate the following text to {target_name}.\n"
+            "Do not translate proper names (preserve them in original language).\n"
             "Output ONLY the translation with the same ###BLOCKn### markers, no explanations.\n\n"
             f"{combined_text}\n"
         )

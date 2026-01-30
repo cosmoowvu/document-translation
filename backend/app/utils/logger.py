@@ -74,6 +74,10 @@ class JobLogger:
     def log_translation_mode(self, translation_mode: str):
         """บันทึกโหมดการแปล"""
         self.stats["translation_mode"] = translation_mode
+
+    def log_detected_language(self, detected_lang: str):
+        """บันทึกภาษาที่ตรวจพบ (Auto Detect)"""
+        self.stats["detected_language"] = detected_lang
     
     def log_block(self, page_no: int, block_idx: int, original: str, translated: str, 
                   detected_lang: str, was_translated: bool, nllb_translated: str = None):

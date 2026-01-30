@@ -13,52 +13,53 @@ function escapeHTML(text) {
 function swapLanguages() {
     const sourceVal = sourceLang.value;
     const targetVal = targetLang.value;
+
+    // Prevent swap if source is auto
+    if (sourceVal === 'auto') return;
+
     sourceLang.value = targetVal;
     targetLang.value = sourceVal;
 }
 
+// Update Swap Button State
+function updateSwapButtonState() {
+    const sourceVal = sourceLang.value;
+    const swapBtn = document.querySelector('.swap-btn');
+
+    if (swapBtn) {
+        if (sourceVal === 'auto') {
+            swapBtn.disabled = true;
+            swapBtn.classList.add('disabled');
+            swapBtn.style.opacity = '0.5';
+            swapBtn.style.cursor = 'not-allowed';
+        } else {
+            swapBtn.disabled = false;
+            swapBtn.classList.remove('disabled');
+            swapBtn.style.opacity = '1';
+            swapBtn.style.cursor = 'pointer';
+        }
+    }
+}
+
+// Expose to window
+window.updateSwapButtonState = updateSwapButtonState;
+window.swapLanguages = swapLanguages;
+
 // Reset App - Just reset UI, don't delete files
 async function resetApp() {
-    // Clear state
-    localStorage.removeItem('translationState');
-    currentJobId = null;
-    if (window.setCurrentJobId) {
-        window.setCurrentJobId(null);
-    }
-    fileInput.value = '';
-
-    // Stop process timer if running
+    // 1. Stop process timer if running
     if (window.TranslationUI) {
         window.TranslationUI.stopTimer();
     }
 
-    // Reset UI sections
-    uploadSection.style.display = 'block';
-    progressSection.classList.remove('active');
-    errorSection.classList.remove('active');
-    resultSection.style.display = 'none';
-    exportSection.classList.remove('active');
-
-    // Reset upload area UI (important!)
-    uploadArea.classList.remove('has-file');
-
-    // Restore original upload content
-    const uploadContent = document.getElementById('uploadContent');
-    uploadContent.innerHTML = `
-        <div class="upload-icon">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke-width="1.5">
-                <path stroke-linecap="round" stroke-linejoin="round"
-                    d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
-            </svg>
-        </div>
-        <p class="upload-text">คลิกเพื่ออัปโหลด หรือลากไฟล์มาที่นี่</p>
-        <p class="supported-formats">รองรับ PDF, JPEG, PNG (สูงสุด 30MB)</p>
-    `;
-    uploadContent.classList.remove('hidden');
-    document.getElementById('fileDisplay').classList.remove('active');
-
-    // Reset buttons
-    document.getElementById('translateBtn').classList.remove('active');
+    // 2. Use the central removeFile function to clear state and UI
+    if (typeof window.removeFile === 'function') {
+        // Pass false to keep the job on server (Persist Cache)
+        await window.removeFile(false);
+    } else {
+        console.error('removeFile function not found, reloading page...');
+        window.location.reload();
+    }
 }
 
 // Clear all files (manual cleanup)

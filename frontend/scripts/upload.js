@@ -79,6 +79,8 @@ async function handleFile(file) {
         // Update module state if available
         if (window.setCurrentJobId) {
             window.setCurrentJobId(currentJobId);
+        } else {
+            window.currentJobId = currentJobId;
         }
 
         // Show file preview
@@ -171,57 +173,74 @@ function formatFileSize(bytes) {
 }
 
 // Remove File - Updated for new UI
-async function removeFile() {
-    // Delete job files
-    if (currentJobId) {
+window.removeFile = async function (deleteFromServer = true) {
+    // Delete job files (Only if requested)
+    if (deleteFromServer && typeof currentJobId !== 'undefined' && currentJobId) {
         try {
             await fetch(`${API_URL}/api/job/${currentJobId}`, {
                 method: 'DELETE'
             });
+            console.log('Deleted job:', currentJobId);
         } catch (error) {
             console.error('Error deleting job:', error);
         }
     }
 
     // Reset state
-    currentJobId = null;
+    if (typeof currentJobId !== 'undefined') {
+        currentJobId = null;
+    }
     if (window.setCurrentJobId) {
         window.setCurrentJobId(null);
     }
-    fileInput.value = '';
+
+    // Clear inputs
+    if (fileInput) fileInput.value = '';
     localStorage.removeItem('translationState');
 
     // Hide all sections except upload
-    uploadSection.style.display = 'block';
-    progressSection.classList.remove('active');
-    errorSection.classList.remove('active');
-    resultSection.style.display = 'none';
-    exportSection.classList.remove('active');
+    if (uploadSection) uploadSection.style.display = 'block';
+    if (progressSection) progressSection.classList.remove('active');
+    if (errorSection) errorSection.classList.remove('active');
+    if (resultSection) resultSection.style.display = 'none';
+    if (exportSection) exportSection.classList.remove('active');
 
     // Reset upload area UI
-    uploadArea.classList.remove('has-file');
+    if (uploadArea) uploadArea.classList.remove('has-file');
 
-    // Restore original upload content HTML (in case skeleton loader was shown)
+    // Restore original upload content HTML
     const uploadContent = document.getElementById('uploadContent');
-    uploadContent.innerHTML = `
-        <div class="upload-icon">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke-width="1.5">
-                <path stroke-linecap="round" stroke-linejoin="round"
-                    d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
-            </svg>
-        </div>
-        <p class="upload-text">คลิกเพื่ออัปโหลด หรือลากไฟล์มาที่นี่</p>
-        <p class="supported-formats">รองรับ PDF, JPEG, PNG (สูงสุด 30MB)</p>
-    `;
-    uploadContent.classList.remove('hidden');
-    document.getElementById('filePreviewSection').style.display = 'none';
+    if (uploadContent) {
+        uploadContent.innerHTML = `
+            <div class="upload-icon">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke-width="1.5">
+                    <path stroke-linecap="round" stroke-linejoin="round"
+                        d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+                </svg>
+            </div>
+            <p class="upload-text">คลิกเพื่ออัปโหลด หรือลากไฟล์มาที่นี่</p>
+            <p class="supported-formats">รองรับ PDF, JPEG, PNG (สูงสุด 30MB)</p>
+        `;
+        uploadContent.classList.remove('hidden');
+    }
+
+    const filePreviewSection = document.getElementById('filePreviewSection');
+    if (filePreviewSection) filePreviewSection.style.display = 'none';
 
     // Clear previews
-    document.getElementById('imagePreview').style.display = 'none';
-    document.getElementById('imagePreview').src = '';
-    document.getElementById('pdfPreview').style.display = 'none';
-    document.getElementById('pdfPages').innerHTML = '';
+    const imagePreview = document.getElementById('imagePreview');
+    if (imagePreview) {
+        imagePreview.style.display = 'none';
+        imagePreview.src = '';
+    }
+
+    const pdfPreview = document.getElementById('pdfPreview');
+    if (pdfPreview) pdfPreview.style.display = 'none';
+
+    const pdfPages = document.getElementById('pdfPages');
+    if (pdfPages) pdfPages.innerHTML = '';
 
     // Reset buttons
-    document.getElementById('translateBtn').classList.remove('active');
-}
+    const translateBtn = document.getElementById('translateBtn');
+    if (translateBtn) translateBtn.classList.remove('active');
+};

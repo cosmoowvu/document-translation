@@ -68,3 +68,115 @@ def should_translate(text: str, target_lang: str) -> Tuple[bool, str]:
         return False, detected
     
     return True, detected
+
+
+# ============================================
+# Text Normalization Utilities (moved from render_service.py)
+# ============================================
+
+def normalize_punctuation(text: str) -> str:
+    """แปลง fullwidth punctuation เป็น ascii เพื่อแก้ปัญหา font"""
+    replacements = {
+        '。': '.',
+        '？': '?',
+        '！': '!',
+        '，': ',',
+        '：': ':',
+        '；': ';',
+        '（': '(',
+        '）': ')',
+        '"': '"',
+        '"': '"',
+        ''': "'",
+        ''': "'"
+    }
+    for k, v in replacements.items():
+        text = text.replace(k, v)
+    return text
+
+
+def cleanup_llm_explanations(text: str) -> str:
+    """Clean up English explanations from LLM output (same as frontend cleanup)"""
+    original_text = text
+    
+    # Only remove SPECIFIC explanation patterns, not all English text
+    text = re.sub(r'I made some changes.*$', '', text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r'Here\'s a brief.*$', '', text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r'\*\*Explanation[^*]*\*\*.*$', '', text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r'Let me know.*$', '', text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r'\*\*[A-Za-z\s:]+\*\*.*$', '', text, flags=re.DOTALL)
+    
+    # Remove common LLM prefixes
+    text = re.sub(r'^(Translation:|Output:|Result:)\s*', '', text, flags=re.MULTILINE | re.IGNORECASE)
+    
+    # Remove bullet points with English explanations
+    text = re.sub(r'(\n\s*\*\s+In BLOCK.*$)', '', text, flags=re.DOTALL)
+    
+    text = text.strip()
+    
+    if text != original_text:
+        print(f"   🧹 Cleaned up LLM explanations for rendering")
+    
+    return text
+
+
+def normalize_ocr_text(text: str) -> list:
+    """
+    แปลง OCR text เป็น structured paragraphs
+    รักษา \\n และ \\n\\n
+    Returns: List of {"type": "heading"|"paragraph", "text": str}
+    """
+    # Clean up markdown artifacts
+    text = re.sub(r'```[a-z]*\n?', '', text)  # Remove code blocks
+    text = re.sub(r'\*\*([^*]+)\*\*', r'\1', text)  # Remove bold
+    text = re.sub(r'\*([^*]+)\*', r'\1', text)  # Remove italic
+    text = re.sub(r'#+\s*', '', text)  # Remove heading markers
+    
+    # Split by double newline (paragraphs)
+    paragraphs = text.split('\n\n')
+    
+    result = []
+    for para in paragraphs:
+        para = para.strip()
+        if not para:
+            continue
+        
+        # Check if it looks like a heading (short, no period at end)
+        is_heading = len(para) < 100 and not para.endswith('.')
+        
+        result.append({
+            "type": "heading" if is_heading else "paragraph",
+            "text": para
+        })
+    
+    return result
+
+
+def is_ocr_flow_mode(page_data: dict) -> bool:
+    """
+    ตรวจสอบว่าเป็น OCR flow mode หรือไม่
+    Return True ถ้า:
+    - มี block เดียว
+    - bbox ครอบเกือบทั้งหน้า (margin-based)
+    """
+    blocks = page_data.get("blocks", [])
+    if len(blocks) != 1:
+        return False
+    
+    block = blocks[0]
+    bbox = block.get("bbox", {})
+    page_width = page_data.get("width", 0)
+    page_height = page_data.get("height", 0)
+    
+    if not all([bbox.get("x1"), bbox.get("y1"), bbox.get("x2"), bbox.get("y2")]):
+        return False
+    
+    # Check if bbox covers most of page (margin-based from Typhoon OCR)
+    margin_threshold = 100  # points
+    
+    is_near_left = bbox["x1"] < margin_threshold
+    is_near_top = bbox["y1"] < margin_threshold
+    is_near_right = (page_width - bbox["x2"]) < margin_threshold
+    is_near_bottom = (page_height - bbox["y2"]) < margin_threshold
+    
+    return is_near_left and is_near_top and is_near_right and is_near_bottom

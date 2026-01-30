@@ -10,12 +10,12 @@ from app.services.llm_service import LLMService
 
 # Batch Size Constants
 MAX_WORDS_PER_BLOCK = 200      # ✅ เพิ่มจาก 70 → 200 เพราะ NLLB รับได้ 1024 tokens แล้ว
-MAX_BLOCKS_PER_BATCH = 5       # จำนวน blocks สูงสุดต่อ batch
+MAX_BLOCKS_PER_BATCH = 3       # จำนวน blocks สูงสุดต่อ batch (ตรงกับ config)
 
 
 def count_words(text: str) -> int:
     """นับจำนวนคำ รวม marker ###BLOCKn### ด้วย"""
-    words = text.split()
+    words = re.findall(r'\S+|\s+', text)
     return len(words)
 
 

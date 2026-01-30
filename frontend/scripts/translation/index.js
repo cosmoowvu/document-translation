@@ -30,6 +30,13 @@ export function initTranslation(jobId) {
             const state = JSON.parse(savedState);
             if (state.jobId && state.status) {
                 currentJobId = state.jobId;
+                // Sync global scope
+                if (typeof setCurrentJobId === 'function') {
+                    setCurrentJobId(currentJobId);
+                } else if (window.setCurrentJobId) {
+                    window.setCurrentJobId(currentJobId);
+                }
+
                 if (state.status === 'progress') {
                     resumeTranslation();
                 } else if (state.status === 'result') {
@@ -102,8 +109,23 @@ async function pollStatus() {
         }
     } catch (error) {
         console.error('Poll error:', error);
+
+        // Handle 404 or specific errors that imply job is gone
+        if (error.message && (error.message.includes('404') || error.message.includes('not found'))) {
+            console.log('Job not found (404) - resetting state');
+            localStorage.removeItem('translationState');
+
+            // Reset UI silently or with toast
+            if (window.resetApp) {
+                window.resetApp();
+            } else {
+                window.location.reload();
+            }
+            return;
+        }
+
         if (currentJobId) {
-            TranslationUI.showError('ไม่สามารถเชื่อมต่อ server ได้');
+            TranslationUI.showError('ไม่สามารถเชื่อมต่อ server ได้: ' + error.message);
         }
     }
 }
@@ -229,4 +251,6 @@ export function getCurrentJobId() {
 
 export function setCurrentJobId(jobId) {
     currentJobId = jobId;
+    // Ensure global scope is updated for UI calls
+    window.currentJobId = jobId;
 }

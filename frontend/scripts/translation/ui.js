@@ -213,7 +213,7 @@ export const TranslationUI = {
 
         // Load previews
         await this.loadAllOriginalPages(jobId, numPages);
-        await this.loadOCRLogs(jobId);
+        await this.loadResultStats(jobId);
         await this.loadAllTranslatedPages(jobId, numPages);
 
         // Set export links
@@ -309,19 +309,16 @@ export const TranslationUI = {
         }
     },
 
-    // Load OCR logs with combined 3-column layout
-    async loadOCRLogs(jobId) {
-        const textCombinedPreview = document.getElementById('textCombinedPreview');
-
+    // Load result stats (Badges only)
+    async loadResultStats(jobId) {
         // Get model info
         const modelElement = document.getElementById('translationModel');
         const modelName = modelElement ? modelElement.options[modelElement.selectedIndex].text : 'Unknown Model';
-        const ocrName = 'EasyOCR';
 
-        // Fetch total time and languages
         let timeBadge = '';
         let langBadge = '';
-        let ocrBadge = '';  // ✅ Declare here, outside try block
+        let detectedLangBadge = '';
+        let ocrBadge = '';
 
         try {
             const statusData = await TranslationAPI.pollStatus(jobId);
@@ -344,19 +341,16 @@ export const TranslationUI = {
             let sourceLang = 'tha_Thai';
             let targetLang = 'eng_Latn';
 
-            // Try to get from stats first (persistent)
             if (statusData.stats && statusData.stats.languages) {
                 sourceLang = statusData.stats.languages.source;
                 targetLang = statusData.stats.languages.target;
             } else {
-                // Fallback to current DOM selection (might be wrong if page refreshed)
                 const sourceEl = document.getElementById('sourceLang');
                 const targetEl = document.getElementById('targetLang');
                 if (sourceEl) sourceLang = sourceEl.value;
                 if (targetEl) targetLang = targetEl.value;
             }
 
-            // Map codes to flags/names
             const langMap = {
                 'tha_Thai': '🇹🇭 Thai',
                 'eng_Latn': '🇬🇧 English',
@@ -370,25 +364,26 @@ export const TranslationUI = {
 
             langBadge = `<span class="badge" style="background-color: #f3e5f5; color: #7b1fa2; padding: 4px 8px; border-radius: 4px; font-size: 0.8rem;">${sourceName} ➝ ${targetName}</span>`;
 
+            // Detected Language Badge
+            if (statusData.stats && statusData.stats.detected_language) {
+                const detectedCode = statusData.stats.detected_language;
+                const detectedName = langMap[detectedCode] || detectedCode;
+                detectedLangBadge = `<span class="badge" style="background-color: #fce4ec; color: #c2185b; padding: 4px 8px; border-radius: 4px; font-size: 0.8rem; margin-left: 4px;">🔍 Detected: ${detectedName}</span>`;
+            }
+
             // OCR Engine Badge
             if (statusData.stats && statusData.stats.ocr_engine) {
                 const ocrEngine = statusData.stats.ocr_engine;
                 let ocrName;
 
-                // ✅ Use .includes() to catch variants like "paddleocr (fallback)", "typhoon-api (auto)", etc.
                 if (ocrEngine.includes('paddleocr') || ocrEngine.includes('paddle')) {
                     ocrName = 'PaddleOCR';
-
                 } else if (ocrEngine.includes('typhoon')) {
                     ocrName = 'Typhoon OCR';
-
                 } else if (ocrEngine.includes('docling')) {
                     ocrName = 'Docling';
-
                 } else {
-                    // Fallback for unknown engines
                     ocrName = ocrEngine;
-
                 }
 
                 ocrBadge = `<span class="badge" style="background-color: #fff3e0; color: #e65100; padding: 4px 8px; border-radius: 4px; font-size: 0.8rem;">📸 ${ocrName}</span>`;
@@ -403,45 +398,10 @@ export const TranslationUI = {
                 🤖 ${modelName}
             </span>
             ${langBadge}
+            ${detectedLangBadge}
             ${ocrBadge}
             ${timeBadge}
         `;
-
-        textCombinedPreview.innerHTML = '<p style="color: #999; padding: 20px; text-align: center;">กำลังโหลด...</p>';
-
-        try {
-            const data = await TranslationAPI.getLogs(jobId);
-            const blockLogs = data.block_logs || {};
-            let combinedHTML = '';
-
-            const pages = Object.keys(blockLogs).sort();
-            const totalPages = pages.length;
-
-            if (pages.length === 0) {
-                textCombinedPreview.innerHTML = '<p style="color: #999; padding: 20px; text-align: center;">ไม่มีข้อมูล</p>';
-                return;
-            }
-
-            for (let i = 0; i < pages.length; i++) {
-                const pageKey = pages[i];
-                const logText = blockLogs[pageKey];
-                const pageNum = pageKey.replace('page_', '');
-
-                combinedHTML += `<div class="ocr-page-header" data-page="${pageNum}">หน้า ${parseInt(pageNum)} / ${totalPages}</div>`;
-
-                const blocks = this.parseBlockLog(logText, pageNum);
-
-                blocks.forEach(block => {
-                    combinedHTML += this.createCombinedBlockHTML(block.num, block.original, block.nllb, block.translated, pageNum, block.isTable, block.isHeader);
-                });
-            }
-
-            textCombinedPreview.innerHTML = combinedHTML;
-
-        } catch (error) {
-            console.error('Error loading OCR logs:', error);
-            textCombinedPreview.innerHTML = `<p style="color: #e74c3c; padding: 20px;">เกิดข้อผิดพลาด: ${error.message}</p>`;
-        }
     },
 
     // Parse block log text
@@ -629,5 +589,107 @@ export const TranslationUI = {
                 </div>
             </div>
         `;
+    },
+
+    // ==========================================
+    // Detailed Compare Modal Logic
+    // ==========================================
+
+    openCompareModal(jobId) {
+        if (!jobId) return;
+        const modal = document.getElementById('compareModal');
+        modal.style.display = 'flex';
+        document.body.style.overflow = 'hidden'; // Prevent background scrolling
+
+        // Load default view (Original)
+        this.switchCompareView(jobId, 'original');
+
+        // Load text cards
+        this.loadCompareCards(jobId);
+    },
+
+    closeCompareModal() {
+        const modal = document.getElementById('compareModal');
+        modal.style.display = 'none';
+        document.body.style.overflow = '';
+    },
+
+    async switchCompareView(jobId, viewType = null) {
+        if (!jobId && window.getCurrentJobId) jobId = window.getCurrentJobId();
+
+        // If viewType not passed, get from select
+        if (!viewType) {
+            viewType = document.getElementById('compareViewSelect').value;
+        }
+
+        const viewerContent = document.getElementById('compareViewerContent');
+        viewerContent.innerHTML = '<div class="placeholder-text">กำลังโหลด...</div>';
+
+        try {
+            // Get number of pages
+            const numPages = await this.getNumPages(jobId);
+            viewerContent.innerHTML = ''; // Clear placeholder
+
+            for (let page = 1; page <= numPages; page++) {
+                const wrapper = document.createElement('div');
+                wrapper.className = 'page-wrapper';
+                wrapper.style.maxWidth = '90%';
+                wrapper.style.marginBottom = '20px';
+
+                const img = document.createElement('img');
+                img.src = TranslationAPI.getPreviewUrl(jobId, page, viewType);
+                img.alt = `${viewType} Page ${page}`;
+                img.style.display = 'block'; // Always block in modal
+                img.loading = 'lazy';
+
+                wrapper.appendChild(img);
+                viewerContent.appendChild(wrapper);
+            }
+
+        } catch (error) {
+            console.error('Error loading compare view:', error);
+            viewerContent.innerHTML = `<div class="placeholder-text" style="color: #ef4444;">เกิดข้อผิดพลาดในการโหลดรูปภาพ</div>`;
+        }
+    },
+
+    async loadCompareCards(jobId) {
+        if (!jobId && window.getCurrentJobId) jobId = window.getCurrentJobId();
+
+        const contentArea = document.getElementById('compareCardsContent');
+        contentArea.innerHTML = '<div class="placeholder-text">กำลังโหลดข้อมูล...</div>';
+
+        try {
+            const data = await TranslationAPI.getLogs(jobId);
+            const blockLogs = data.block_logs || {};
+            let combinedHTML = '';
+
+            const pages = Object.keys(blockLogs).sort();
+            const totalPages = pages.length;
+
+            if (pages.length === 0) {
+                contentArea.innerHTML = '<div class="placeholder-text">ไม่มีข้อมูลข้อความ</div>';
+                return;
+            }
+
+            for (let i = 0; i < pages.length; i++) {
+                const pageKey = pages[i];
+                const logText = blockLogs[pageKey];
+                const pageNum = pageKey.replace('page_', '');
+
+                combinedHTML += `<div class="ocr-page-header" data-page="${pageNum}">หน้า ${parseInt(pageNum)} / ${totalPages}</div>`;
+
+                const blocks = this.parseBlockLog(logText, pageNum);
+
+                blocks.forEach(block => {
+                    combinedHTML += this.createCombinedBlockHTML(block.num, block.original, block.nllb, block.translated, pageNum, block.isTable, block.isHeader);
+                });
+            }
+
+            contentArea.innerHTML = combinedHTML;
+
+        } catch (error) {
+            console.error('Error loading compare cards:', error);
+            contentArea.innerHTML = `<div class="placeholder-text" style="color: #ef4444;">เกิดข้อผิดพลาด: ${error.message}</div>`;
+        }
     }
 };

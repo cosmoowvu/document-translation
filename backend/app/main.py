@@ -63,7 +63,10 @@ async def preload_models():
 async def lifespan(app: FastAPI):
     """Lifespan context manager for startup/shutdown"""
     # Startup: Preload model (async, non-blocking)
-    asyncio.create_task(preload_models())
+    if settings.PRELOAD_MODELS:
+        asyncio.create_task(preload_models())
+    else:
+        print("⏭️ Skipping model preload (PRELOAD_MODELS=False)")
     
     yield
     # Shutdown logic (if any)
