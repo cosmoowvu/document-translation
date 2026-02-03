@@ -6,14 +6,13 @@ from typing import List, Dict
 
 from app.services.text_processor import normalize_text, should_translate
 from app.services.llm_service import LLMService
-from app.services.translation.nllb_service import nllb_translator
 
 TABLE_CELLS_PER_BATCH = 6  # จำนวน cells สูงสุดต่อ batch
 
 
 class TableTranslator:
     """
-    Handles table cell translation with batch support
+    Handles table cell translation with batch support (Typhoon Only)
     """
     def __init__(self, llm_service: LLMService):
         self.llm = llm_service
@@ -26,9 +25,7 @@ class TableTranslator:
         refine_model: str = None
     ) -> List[Dict]:
         """
-        แปล cells ในตาราง
-        - ใช้ batch translation
-        - รองรับ NLLB+Refine mode
+        แปล cells ในตาราง (Typhoon Direct)
         """
         if not cells:
             return []
@@ -74,24 +71,8 @@ class TableTranslator:
             
             print(f"   🔄 Batch {batch_num}/{total_batches}: cells {i+1}-{i+len(chunk)}")
             
-            if use_nllb_refine and refine_model:
-                # NLLB+Refine mode
-                print(f"      🌐 NLLB Translate...")
-                nllb_results = nllb_translator.translate_batch(chunk, src_lang=src_lang, tgt_lang=target_lang)
-                
-                print(f"      ✨ LLM Refine with {refine_model}...")
-                original_model = self.llm.model
-                self.llm.model = refine_model
-                
-                if "gemma" in refine_model.lower():
-                    chunk_results = self.llm.refine_batch_gemma(nllb_results, target_lang)
-                else:
-                    chunk_results = self.llm.refine_batch_qwen(nllb_results, target_lang)
-                
-                self.llm.model = original_model
-            else:
-                # Direct LLM translation
-                chunk_results = self.llm.translate_batch_llm(chunk, target_lang, src_lang)
+            # Use Typhoon Direct
+            chunk_results = self.llm.translate_batch_typhoon(chunk, target_lang, src_lang)
             
             translated_texts.extend(chunk_results)
         
@@ -131,8 +112,8 @@ class TableTranslator:
             translated_cells = self.translate_cells(
                 cells,
                 target_lang,
-                use_nllb_refine=use_nllb_refine,
-                refine_model=refine_model
+                use_nllb_refine=False,
+                refine_model=None
             )
             
             translated_tables.append({

@@ -5,13 +5,11 @@
 // Import modules
 import { TranslationAPI } from './api.js';
 import { TranslationUI } from './ui.js';
-import { PollingService } from './polling.js';
 import { OCRParser } from './ocr-parser.js';
 
 // Re-export for external use
 export { TranslationAPI } from './api.js';
 export { TranslationUI } from './ui.js';
-export { PollingService } from './polling.js';
 export { OCRParser } from './ocr-parser.js';
 
 

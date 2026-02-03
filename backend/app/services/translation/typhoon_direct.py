@@ -63,8 +63,20 @@ def translate_batch_typhoon(
     lang_names = {
         "eng_Latn": "English",
         "tha_Thai": "Thai",
+        "zho_Hans": "Chinese (Simplified)",
+        "zho_Hant": "Chinese (Traditional)",
+        "jpn_Jpan": "Japanese",
+        "kor_Hang": "Korean",
+        "lao_Laoo": "Lao",
+        "mya_Mymr": "Burmese",
+        "khm_Khmr": "Khmer",
+        "vie_Latn": "Vietnamese",
+        "ind_Latn": "Indonesian",
+        "msa_Latn": "Malay",
     }
-    target_name = lang_names.get(target_lang, "English" if target_lang != "tha_Thai" else "Thai")
+    # Fallback to English only if target is explicitly English or unknown Latin
+    # For others, use the code itself if not in map (better than forcing English)
+    target_name = lang_names.get(target_lang, target_lang)
     
     # Build batch prompt with markers
     lines_text = []

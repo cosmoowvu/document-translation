@@ -2,6 +2,23 @@
    Utils - Helper Functions
    =================================== */
 
+// API URL (use current origin for flexibility)
+const API_URL = window.location.origin;
+
+// ===== State Persistence =====
+
+// Save state to localStorage
+function saveState(jobId, view) {
+    localStorage.setItem('translationState', JSON.stringify({
+        currentJobId: jobId,
+        currentView: view,
+        timestamp: Date.now()
+    }));
+}
+
+// Expose to window for other scripts
+window.saveState = saveState;
+
 // Escape HTML
 function escapeHTML(text) {
     const div = document.createElement('div');
@@ -11,6 +28,11 @@ function escapeHTML(text) {
 
 // Swap Languages
 function swapLanguages() {
+    const sourceLang = document.getElementById('sourceLang');
+    const targetLang = document.getElementById('targetLang');
+
+    if (!sourceLang || !targetLang) return;
+
     const sourceVal = sourceLang.value;
     const targetVal = targetLang.value;
 
@@ -23,21 +45,23 @@ function swapLanguages() {
 
 // Update Swap Button State
 function updateSwapButtonState() {
-    const sourceVal = sourceLang.value;
+    const sourceLang = document.getElementById('sourceLang');
     const swapBtn = document.querySelector('.swap-btn');
 
-    if (swapBtn) {
-        if (sourceVal === 'auto') {
-            swapBtn.disabled = true;
-            swapBtn.classList.add('disabled');
-            swapBtn.style.opacity = '0.5';
-            swapBtn.style.cursor = 'not-allowed';
-        } else {
-            swapBtn.disabled = false;
-            swapBtn.classList.remove('disabled');
-            swapBtn.style.opacity = '1';
-            swapBtn.style.cursor = 'pointer';
-        }
+    if (!sourceLang || !swapBtn) return;
+
+    const sourceVal = sourceLang.value;
+
+    if (sourceVal === 'auto') {
+        swapBtn.disabled = true;
+        swapBtn.classList.add('disabled');
+        swapBtn.style.opacity = '0.5';
+        swapBtn.style.cursor = 'not-allowed';
+    } else {
+        swapBtn.disabled = false;
+        swapBtn.classList.remove('disabled');
+        swapBtn.style.opacity = '1';
+        swapBtn.style.cursor = 'pointer';
     }
 }
 

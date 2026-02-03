@@ -13,7 +13,7 @@ export const TranslationAPI = {
             job_id: jobId,
             source_lang: sourceLang || 'tha_Thai',
             target_lang: targetLang || 'eng_Latn',
-            translation_mode: translationMode || 'qwen_direct',
+            translation_mode: translationMode || 'typhoon_direct',
             ocr_engine: ocrEngine  // ✅ Add OCR engine
         };
 

@@ -7,9 +7,6 @@ from app.config import settings
 
 # Import translation modules
 from app.services.translation.typhoon_direct import translate_batch_typhoon as typhoon_translate
-from app.services.translation.qwen_refiner import refine_batch_qwen as qwen_refine
-from app.services.translation.gemma_refiner import refine_batch_gemma as gemma_refine
-from app.services.translation.llama_refiner import refine_batch_llama as llama_refine
 
 class LLMService:
     def __init__(self):
@@ -67,19 +64,16 @@ class LLMService:
     def detect_language(self, text: str) -> str:
         """
         Detect language using LLM (More robust than regex)
+        Dynamic detection: Returns standard code (e.g. eng_Latn, tha_Thai, fra_Latn)
         """
         if not text or len(text.strip()) < 5:
             return "eng_Latn"
             
+        # Dynamic prompt - ask LLM to identify and return standard code
         prompt = (
             "Identify the language of the following text.\n"
-            "Return ONLY the standardized code from this list:\n"
-            "- eng_Latn (English)\n"
-            "- tha_Thai (Thai)\n"
-            "- jpn_Jpan (Japanese)\n"
-            "- zho_Hans (Chinese)\n"
-            "- kor_Hang (Korean)\n\n"
-            "If unsure, return 'eng_Latn'.\n"
+            "Return ONLY the standardized ISO 639-3 code (e.g., eng_Latn, tha_Thai, jpn_Jpan, zho_Hans, fra_Latn, spa_Latn, etc.).\n"
+            "If the script is Latin, append '_Latn'. If Thai, '_Thai'. If unsure, return 'eng_Latn'.\n"
             "Do not explain. Return ONLY the code.\n\n"
             f"Text: \"{text[:500]}\""
         )
@@ -94,23 +88,37 @@ class LLMService:
                     "stream": False,
                     "options": {"temperature": 0.1, "num_predict": 10}
                 },
-                timeout=30
+                timeout=120  # ✅ Increased to 120s to allow model loading time
             )
             
             if resp.status_code == 200:
                 result = resp.json().get("response", "").strip()
-                # Clean up response
-                match = re.search(r'([a-z]{3}_[A-Za-z]{4})', result)
+                
+                # Check if result looks like a code (e.g. xyz_Script)
+                # Matches: 3 lowercase letters, underscore, 4 letters (Script)
+                # Or just 2-3 letters (ISO 639-1/2) fallback
+                match = re.search(r'([a-z]{2,3}_[A-Za-z]{4})', result)
                 if match:
                     return match.group(1)
                 
-                # Fallback mapping if LLM returns name
+                # Fallback: if LLM returns just "Thai" or "English"
+                # We do a basic mapping for common ones, but accept others if we can normalize
                 result_lower = result.lower()
+                
+                # Dynamic mapping helper could be here, but for now specific overrides
                 if "thai" in result_lower: return "tha_Thai"
+                if "english" in result_lower: return "eng_Latn"
                 if "japan" in result_lower: return "jpn_Jpan"
-                if "chin" in result_lower: return "zho_Hans"
+                if "chinese" in result_lower:
+                    return "zho_Hans" if "simplified" in result_lower else "zho_Hant" if "traditional" in result_lower else "zho_Hans"
                 if "korea" in result_lower: return "kor_Hang"
                 
+                # If it returns a simple code like "en", "th"
+                if re.match(r'^[a-z]{2,3}$', result_lower):
+                    # Basic mapping
+                    simple_map = {"en": "eng_Latn", "th": "tha_Thai", "ja": "jpn_Jpan", "zh": "zho_Hans", "ko": "kor_Hang"}
+                    return simple_map.get(result_lower, f"{result_lower}_Latn") # Default to Latn script if unknown
+
                 return "eng_Latn"
             else:
                 print(f"   ⚠️ Detect Lang API Error: {resp.status_code}")
@@ -122,18 +130,27 @@ class LLMService:
     def translate_batch_llm(self, texts: List[str], target_lang: str, src_lang: str = "tha_Thai") -> List[str]:
         """
         แปล batch (รองรับทุก LLM: Qwen, Gemma, Llama)
+        Dynamic target language support
         """
         if not texts:
             return []
         
-        lang_names = {
-            "eng_Latn": "English",
-            "tha_Thai": "Thai",
-            "zho_Hans": "Chinese",
-            "jpn_Jpan": "Japanese",
-            "kor_Hang": "Korean",
-        }
-        target_name = lang_names.get(target_lang, target_lang)
+        # Use target_lang code directly in prompt, or try to humanize it slightly if needed
+        # But mostly LLMs understand "Translate to tha_Thai" or just "Translate to Thai"
+        # Let's try to pass the code directly if it's standard, or use it as name
+        target_name = target_lang
+        
+        # Simple heuristic to make it friendlier if it's a known code style
+        if "_" in target_lang:
+            # e.g. tha_Thai -> Thai
+            try:
+                # This is just a helper, detection/translation should be robust
+                # If we want purely dynamic, we can just say "Translate to {target_lang}"
+                # But "Translate to tha_Thai" might be weird for some models.
+                # Let's just use the code, Typhoon knows these codes well (FLORES-200).
+                pass
+            except:
+                pass
         
         lines_text = []
         for idx, text in enumerate(texts):
@@ -200,18 +217,6 @@ class LLMService:
     def translate_batch_typhoon(self, texts: List[str], target_lang: str, src_lang: str = "tha_Thai", job_status: dict = None, job_id: str = None) -> List[str]:
         """Delegate to typhoon_direct module"""
         return typhoon_translate(texts, target_lang, src_lang, self.url, self.model, job_status, job_id)
-    
-    def refine_batch_qwen(self, texts: List[str], target_lang: str) -> List[str]:
-        """Delegate to qwen_refiner module"""
-        return qwen_refine(texts, target_lang, self.url, self.model)
-    
-    def refine_batch_gemma(self, texts: List[str], target_lang: str) -> List[str]:
-        """Delegate to gemma_refiner module"""
-        return gemma_refine(texts, target_lang, self.url, self.model)
-    
-    def refine_batch_llama(self, texts: List[str], target_lang: str) -> List[str]:
-        """Delegate to llama_refiner module"""
-        return llama_refine(texts, target_lang, self.url, self.model)
 
 
 # Singleton instance

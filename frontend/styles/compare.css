@@ -392,3 +392,24 @@
     margin-top: 50px;
     font-size: 1.1rem;
 }
+
+/* Table in Card Content */
+.card-content table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 8px;
+    margin-bottom: 8px;
+    font-size: 0.9rem;
+}
+
+.card-content table th,
+.card-content table td {
+    border: 1px solid #e5e7eb;
+    padding: 6px 10px;
+    text-align: left;
+}
+
+.card-content table th {
+    background-color: #f9fafb;
+    font-weight: 600;
+}

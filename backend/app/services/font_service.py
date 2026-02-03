@@ -15,18 +15,79 @@ class FontService:
         self.font_path = settings.FONT_PATH
         self._font_cache = {}
     
-    def get_font(self, size: int = 16) -> ImageFont.FreeTypeFont:
-        """โหลด font พร้อม caching"""
-        if size in self._font_cache:
-            return self._font_cache[size]
+    def get_font(self, size: int = 16, text: str = None) -> ImageFont.FreeTypeFont:
+        """โหลด font พร้อม caching และ fallback ภาษาต่างๆ (Auto-detect CJK)"""
         
-        if os.path.exists(self.font_path):
-            try:
-                font = ImageFont.truetype(self.font_path, size)
-                self._font_cache[size] = font
-                return font
-            except:
-                pass
+        # Check if text contains CJK characters
+        is_cjk = False
+        if text:
+            for char in text:
+                if '\u4e00' <= char <= '\u9fff' or '\u3040' <= char <= '\u30ff' or '\uac00' <= char <= '\ud7af':
+                    is_cjk = True
+                    break
+        
+        # Creates a specialized cache key for CJK mode to avoid polluting normal Thai cache
+        cache_key = f"{size}_cjk" if is_cjk else size
+        
+        if cache_key in self._font_cache:
+            return self._font_cache[cache_key]
+        
+        fonts_to_try = []
+        
+        # Windows System Fonts
+        # Windows System Fonts
+        cjk_fonts = [
+            "C:/Windows/Fonts/msgothic.ttc",     # MS Gothic (Japanese) - USER HAS THIS
+            "C:/Windows/Fonts/msjh.ttc",         # Microsoft JhengHei (Traditional Chinese) - USER HAS THIS
+            "C:/Windows/Fonts/msyh.ttc",         # Microsoft YaHei (Chinese) - USER HAS THIS
+            "C:/Windows/Fonts/malgun.ttf",       # Malgun Gothic (Korean) - USER HAS THIS
+            "C:/Windows/Fonts/meiryo.ttc",       # Meiryo (Japanese)
+            "C:/Windows/Fonts/simsun.ttc",       # SimSun (Chinese)
+            "C:/Windows/Fonts/gulim.ttc",        # Gulim (Korean)
+            "C:/Windows/Fonts/arialuni.ttf",     # Arial Unicode MS (Universal)
+            "C:/Windows/Fonts/micross.ttf",      # Microsoft Sans Serif (General Fallback) - USER HAS THIS
+        ]
+        
+        thai_fonts = [
+            self.font_path,                      # Configured Font (Primary)
+            "C:/Windows/Fonts/LeelawadeeUI.ttf", # Good Thai support
+            "C:/Windows/Fonts/tahoma.ttf",       # Standard
+        ]
+        
+        # Prioritize based on content
+        if is_cjk:
+            fonts_to_try = cjk_fonts + thai_fonts # Try CJK first
+            print(f"DEBUG: CJK text detected, trying fonts: {cjk_fonts}")
+        else:
+            fonts_to_try = thai_fonts + cjk_fonts # Try Thai first
+            
+        # Add fallback universal
+        fonts_to_try.append("C:/Windows/Fonts/seguiemj.ttf")
+
+        for font_path in fonts_to_try:
+            if font_path and os.path.exists(font_path):
+                try:
+                    # Try loading standard
+                    font = ImageFont.truetype(font_path, size)
+                    self._font_cache[cache_key] = font
+                    # print(f"   ✅ LOADED FONT: {font_path}")
+                    return font
+                except Exception as e:
+                    # Retry with index=0 for TTC files if failed
+                    if font_path.lower().endswith(".ttc"):
+                        try:
+                            font = ImageFont.truetype(font_path, size, index=0)
+                            self._font_cache[cache_key] = font
+                            print(f"   ✅ LOADED FONT (Index 0): {font_path}")
+                            return font
+                        except:
+                            pass
+                    
+                    print(f"   ⚠️ FAILED to load {font_path}: {e}")
+                    continue
+        
+        # Final fallback
+        print("   ⚠️ No custom/system font found, using default")
         return ImageFont.load_default()
     
     def wrap_text(self, text: str, font, max_width: int, draw) -> List[str]:
@@ -42,7 +103,7 @@ class FontService:
             # ใช้ engine 'newmm' (dictionary-based) ซึ่งเร็วและแม่นยำพอสมควร
             words = word_tokenize(text, engine="newmm", keep_whitespace=True)
         except ImportError:
-            print("⚠️ PyThaiNLP not found, falling back to simple split")
+            # Fallback (rarely happens if requirements installed)
             words = re.findall(r'\S+|\s+', text)
 
         lines = []
@@ -82,7 +143,8 @@ class FontService:
             max_font = min(max_font, 28)
         
         for size in range(max_font, min_font - 1, -1):
-            font = self.get_font(size)
+            # Pass text to detect language specific font requirements
+            font = self.get_font(size, text=text) 
             wrapped = self.wrap_text(text, font, bbox_width, draw)
             
             # คำนวณความสูงรวม (Dynamic line spacing)
@@ -99,7 +161,7 @@ class FontService:
                 return font, wrapped
         
         # ใช้ min font และ warn ถ้า overflow
-        font = self.get_font(min_font)
+        font = self.get_font(min_font, text=text)
         wrapped = self.wrap_text(text, font, bbox_width, draw)
         
         return font, wrapped

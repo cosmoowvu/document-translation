@@ -44,6 +44,9 @@
                     <select id="sourceLang">
                         <option value="tha_Thai" selected>ไทย</option>
                         <option value="eng_Latn">อังกฤษ</option>
+                        <option value="jpn_Jpan">ญี่ปุ่น</option>
+                        <option value="zho_Hans">จีน</option>
+                        <option value="kor_Hang">เกาหลี</option>
                         <option value="auto">ตรวจหาภาษาอัตโนมัติ (Auto Detect)</option>
                     </select>
                 </div>
@@ -58,11 +61,14 @@
                     <select id="targetLang">
                         <option value="eng_Latn">อังกฤษ</option>
                         <option value="tha_Thai">ไทย</option>
+                        <option value="jpn_Jpan">ญี่ปุ่น</option>
+                        <option value="zho_Hans">จีน</option>
+                        <option value="kor_Hang">เกาหลี</option>
                     </select>
                 </div>
             </div>
 
-            <!-- Row 2: Translation Mode & OCR Engine -->
+            <!-- Row 2: OCR Engine Only (Translation Mode hidden) -->
             <div class="language-row" style="margin-bottom: 24px;">
                 <div class="form-group">
                     <label>OCR Engine</label>
@@ -71,24 +77,20 @@
                         <option value="docling">Docling (EasyOCR)</option>
                         <option value="paddleocr">PaddleOCR</option>
                         <option value="typhoon">Typhoon OCR (Cloud)</option>
-                    </select>
-
-                </div>
-
-                <!-- Spacer (same width as swap button) -->
-                <div style="width: 48px;"></div>
-
-                <div class="form-group">
-                    <label>โหมดการแปล</label>
-                    <select id="translationModel">
-                        <option value="typhoon_direct">Typhoon (Direct)</option>
-                        <option value="qwen_direct">Qwen 2.5 (Direct)</option>
-                        <option value="gemma_direct">Gemma 2 (Direct)</option>
-                        <option value="nllb_qwen">NLLB → Qwen 2.5</option>
-                        <option value="nllb_gemma">NLLB → Gemma 2</option>
-                        <option value="nllb_llama">NLLB → Llama 3.2</option>
+                        <option value="hybrid">Hybrid (Docling + Typhoon)</option>
                     </select>
                 </div>
+
+                <!-- Spacer to match Swap Button width -->
+                <button type="button" class="swap-btn" style="visibility: hidden; pointer-events: none;">
+                    ⇄
+                </button>
+
+                <!-- Empty div to balance grid (1fr) -->
+                <div></div>
+
+                <!-- Hidden Translation Mode (Defaults to typhoon_direct) -->
+                <input type="hidden" id="translationModel" value="typhoon_direct">
             </div>
 
             <!-- Upload Area -->
@@ -381,75 +383,12 @@
     </div>
 
     <!-- Scripts (order matters!) -->
-    <script src="scripts/main.js"></script>
     <script src="scripts/utils.js"></script>
     <script src="scripts/modal.js"></script>
     <script src="scripts/upload.js"></script>
 
-    <!-- New modular translation -->
-    <script type="module">
-        import { initTranslation, startTranslation as startTranslationModule, cancelProcess as cancelProcessModule, setCurrentJobId } from './scripts/translation/index.js';
-        import { TranslationUI } from './scripts/translation/ui.js';
-
-        // Generate UUID for job ID
-        function generateUUID() {
-            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
-                const r = Math.random() * 16 | 0;
-                const v = c === 'x' ? r : (r & 0x3 | 0x8);
-                return v.toString(16);
-            });
-        }
-
-        // Initialize on load
-        const urlParams = new URLSearchParams(window.location.search);
-        let jobId = urlParams.get('job');
-
-        // If no URL param, try to recover from localStorage
-        if (!jobId) {
-            try {
-                const savedState = localStorage.getItem('translationState');
-                if (savedState) {
-                    const state = JSON.parse(savedState);
-                    if (state.jobId) {
-                        jobId = state.jobId;
-                        console.log('🔄 Restoring Job ID from storage:', jobId);
-                    }
-                }
-            } catch (e) {
-                console.error('Error reading storage:', e);
-            }
-        }
-
-        // If still no ID, generate new one
-        if (!jobId) {
-            jobId = generateUUID();
-            console.log('✨ Generated new Job ID:', jobId);
-        }
-
-        setCurrentJobId(jobId);
-        // Delay init slightly to ensure DOM is ready
-        setTimeout(() => initTranslation(jobId), 50);
-
-        // Expose to global scope for onclick handlers
-        // Wrap async function for onclick compatibility
-        window.startTranslation = function () {
-            startTranslationModule().catch(err => {
-                console.error('Translation error:', err);
-                alert('เกิดข้อผิดพลาด: ' + err.message);
-            });
-        };
-        window.cancelProcess = cancelProcessModule;
-        window.setCurrentJobId = setCurrentJobId;
-        window.TranslationUI = TranslationUI;
-
-        // Expose Compare Modal functions
-        window.openCompareModal = () => TranslationUI.openCompareModal(window.currentJobId);
-        window.closeCompareModal = () => TranslationUI.closeCompareModal();
-        window.switchCompareView = () => TranslationUI.switchCompareView(window.currentJobId);
-
-        // Set global job ID for other scripts (for backward compatibility)
-        window.currentJobId = jobId;
-    </script>
+    <!-- Application Initialization -->
+    <script type="module" src="scripts/init.js"></script>
 </body>
 
 </html>

@@ -114,10 +114,94 @@ class RenderService:
         
         cursor_y = y_start
         
+        # Regex for table detection
+        import re
+        
         for para_idx, para in enumerate(paragraphs):
             para_text = para["text"]
             para_type = para["type"]
             
+            # Check for HTML Table in Flow Mode (Relaxed Check)
+            table_match = re.search(r'<table.*?>(.*?)</table>', para_text, re.DOTALL | re.IGNORECASE)
+            
+            if table_match:
+                print(f"      📊 Flow Paragraph {para_idx+1} contains HTML Table")
+                
+                # Split content
+                table_start = table_match.start()
+                table_end = table_match.end()
+                
+                pre_text = para_text[:table_start].strip()
+                table_html = para_text[table_start:table_end]
+                post_text = para_text[table_end:].strip()
+                
+                # 1. Render Pre-text (Caption)
+                if pre_text:
+                     # Check Overflow
+                     # (For simplicity in flow, we just write. If overflow, we should have handled it before or strict check.
+                     # But splitting makes it tricky. Let's just wrap and write.)
+                     wrapped_lines = self.font_service.wrap_text(pre_text, font, max_width, draw)
+                     for line in wrapped_lines:
+                        line_bbox = draw.textbbox((0, 0), line, font=font)
+                        line_height = line_bbox[3] - line_bbox[1]
+                        
+                        if cursor_y + line_height > y_end:
+                             print(f"   📄 Page overflow (pre-text): Creating new page")
+                             images.append(canvas)
+                             canvas = Image.new('RGB', (page_width, page_height), 'white')
+                             draw = ImageDraw.Draw(canvas)
+                             cursor_y = y_start
+                        
+                        draw.text((x_start, cursor_y), line, font=font, fill="black")
+                        cursor_y += line_height + line_spacing
+                     
+                     cursor_y += paragraph_spacing
+
+                # 2. Render Table
+                parsed_table = self._parse_html_table(table_html)
+                if parsed_table:
+                    # Estimate height
+                    table_height_estimate = (parsed_table["num_rows"] * int(30 * font_multiplier)) + 20
+                    
+                    if cursor_y + table_height_estimate > y_end:
+                         print(f"   📄 Page overflow (table): Creating new page")
+                         images.append(canvas)
+                         canvas = Image.new('RGB', (page_width, page_height), 'white')
+                         draw = ImageDraw.Draw(canvas)
+                         cursor_y = y_start
+                    
+                    # Construct bbox for table (flow)
+                    flow_bbox = {
+                        "x1": x_start / scale,
+                        "y1": cursor_y / scale,
+                        "x2": x_end / scale,
+                        "y2": (cursor_y + table_height_estimate) / scale 
+                    }
+                    parsed_table["bbox"] = flow_bbox
+                    
+                    # Draw
+                    used_height = self._draw_table(draw, parsed_table, scale, font_multiplier)
+                    cursor_y += used_height + paragraph_spacing
+                
+                # 3. Render Post-text
+                if post_text:
+                     wrapped_lines = self.font_service.wrap_text(post_text, font, max_width, draw)
+                     for line in wrapped_lines:
+                        line_bbox = draw.textbbox((0, 0), line, font=font)
+                        line_height = line_bbox[3] - line_bbox[1]
+                        
+                        if cursor_y + line_height > y_end:
+                             print(f"   📄 Page overflow (post-text): Creating new page")
+                             images.append(canvas)
+                             canvas = Image.new('RGB', (page_width, page_height), 'white')
+                             draw = ImageDraw.Draw(canvas)
+                             cursor_y = y_start
+                        
+                        draw.text((x_start, cursor_y), line, font=font, fill="black")
+                        cursor_y += line_height + line_spacing
+
+                continue
+
             # Add spacing before paragraph
             if para_idx > 0:
                 if para_type == "heading":
@@ -166,6 +250,9 @@ class RenderService:
         scaled_max = int(36 * font_multiplier)
         scaled_min = int(12 * font_multiplier)
         
+        # Regex for table
+        import re
+
         # Render text blocks
         rendered_count = 0
         for idx, block in enumerate(page_data["blocks"]):
@@ -186,6 +273,58 @@ class RenderService:
             box_height = y2 - y1
             
             print(f"   📝 Block {idx+1}: bbox=({x1},{y1})-({x2},{y2}) size={box_width}x{box_height} text={text[:50]}...")
+
+            # Check if block contains HTML table (Robust Regex)
+            # Match: Pre-Text (Caption) + Table + Post-Text
+            full_match = re.search(r'(.*?)(<table.*?>.*?</table>)(.*)', text, re.IGNORECASE | re.DOTALL)
+            
+            if full_match:
+                print(f"      📊 Block {idx+1} contains HTML Table")
+                
+                pre_text = full_match.group(1).strip()
+                table_full_html = full_match.group(2)
+                post_text = full_match.group(3).strip()
+                
+                parsed_table = self._parse_html_table(table_full_html)
+                
+                if parsed_table:
+                    # 1. Render Pre-text (Caption)
+                    current_content_y = y1
+                    
+                    if pre_text:
+                        # Use a reasonable font size for caption
+                        caption_font_size = int(max(scaled_min, scaled_max * 0.7))
+                        caption_font = self.font_service.get_font(caption_font_size)
+                        
+                        wrapped_caption = self.font_service.wrap_text(pre_text, caption_font, box_width, draw)
+                        
+                        for line in wrapped_caption:
+                            line_bbox = draw.textbbox((0, 0), line, font=caption_font)
+                            line_height = line_bbox[3] - line_bbox[1]
+                            
+                            if current_content_y + line_height < y2:
+                                draw.text((x1, current_content_y), line, font=caption_font, fill="black")
+                                current_content_y += line_height + int(4 * font_multiplier)
+                    
+                    # 2. Render Table (in remaining space)
+                    remaining_height = y2 - current_content_y
+                    
+                    if remaining_height > 20: # Minimum height check
+                        # Update bbox to point to remaining space
+                        # _draw_table expects UN-SCALED bbox because it multiplies by scale internally
+                        parsed_table["bbox"] = {
+                            "x1": x1 / scale,
+                            "y1": current_content_y / scale,
+                            "x2": x2 / scale,
+                            "y2": y2 / scale
+                        }
+                        self._draw_table(draw, parsed_table, scale, font_multiplier)
+                    else:
+                        print(f"      ⚠️ Not enough space for table in Block {idx+1}")
+                    
+                    rendered_count += 1
+                    continue # Skip standard text rendering for this block
+
             
             if box_width > 10 and box_height > 10:
                 font, wrapped_lines = self.font_service.fit_text_to_bbox(
@@ -209,15 +348,49 @@ class RenderService:
         
         print(f"   ✅ Rendered {rendered_count} text blocks")
         
-        # Render tables
+        # Render tables (legacy structured tables)
         tables = page_data.get("tables", [])
         for table in tables:
             self._draw_table(draw, table, scale, font_multiplier)
         
         return canvas
     
-    def _draw_table(self, draw, table: Dict, scale: float, font_multiplier: float = 1.0):
-        """วาดตารางพร้อมข้อความแปล"""
+    def _parse_html_table(self, html_text: str) -> Dict:
+        """Parse HTML table string into structured dict"""
+        import re
+        
+        # Simple regex parsing (robust enough for LLM output)
+        rows = re.findall(r'<tr.*?>(.*?)</tr>', html_text, re.DOTALL | re.IGNORECASE)
+        
+        if not rows:
+            return None
+            
+        cells_data = []
+        max_cols = 0
+        
+        for r_idx, row_html in enumerate(rows):
+            # Find cells (td or th)
+            cols = re.findall(r'<t[dh].*?>(.*?)</t[dh]>', row_html, re.DOTALL | re.IGNORECASE)
+            max_cols = max(max_cols, len(cols))
+            
+            for c_idx, cell_content in enumerate(cols):
+                # Remove inner tags if any (simple cleanup)
+                clean_text = re.sub(r'<[^>]+>', '', cell_content).strip()
+                cells_data.append({
+                    "row": r_idx,
+                    "col": c_idx,
+                    "text": clean_text,
+                    "translated": clean_text
+                })
+        
+        return {
+            "num_rows": len(rows),
+            "num_cols": max_cols,
+            "cells": cells_data
+        }
+    
+    def _draw_table(self, draw, table: Dict, scale: float, font_multiplier: float = 1.0) -> int:
+        """วาดตารางพร้อมข้อความแปล Return used height in pixels"""
         bbox = table.get("bbox", {})
         
         x1 = int(bbox.get("x1", 0) * scale)
@@ -233,7 +406,14 @@ class RenderService:
         cells = table.get("cells", [])
         
         if num_rows == 0 or num_cols == 0:
-            return
+            return 0
+        
+        # Calculate optimal row heights based on content?
+        # For now, fixed uniform distribution as per original logic, 
+        # but we should respect the bbox height provided.
+        # However, for mixed content, we passed a bbox that goes to the bottom of the block.
+        # We might want to auto-calc height if needed?
+        # Let's stick to the allocated space (uniform) for now to be safe with fixed layouts.
         
         cell_width = table_width // num_cols
         cell_height = table_height // num_rows
@@ -269,9 +449,13 @@ class RenderService:
             if available_width < 10 or available_height < 10:
                 continue
             
-            max_font = int(16 * font_multiplier)
+            max_font = int(14 * font_multiplier) # Slightly smaller for tables
             min_font = int(8 * font_multiplier)
             
+            # Simple font fitting
+            font = self.font_service.get_font(min_font) # Default to min if small space
+            
+            # Try to find best fit
             for font_size in range(max_font, min_font - 1, -1):
                 font = self.font_service.get_font(font_size)
                 wrapped_lines = self.font_service.wrap_text(text, font, available_width, draw)
@@ -292,6 +476,8 @@ class RenderService:
                 if current_y + line_height <= cy + available_height:
                     draw.text((cx, current_y), line, fill="black", font=font)
                     current_y += line_height + 2
+        
+        return table_height
     
     def render_document(self, job_id: str, doc_result: Dict[str, Any]) -> str:
         """Render เอกสารทั้งหมดและบันทึก พร้อม export หลายรูปแบบ"""

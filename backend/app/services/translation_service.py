@@ -3,60 +3,40 @@
 from app.services.translation import translation_service
 
 
-def process_translation(job_id: str, file_path: str, source_lang: str, target_lang: str, job_status: dict, translation_mode: str = "qwen_direct", cache_key: str = None, ocr_engine: str = "docling"):
-    """
-    Background task สำหรับแปลเอกสาร
-    translation_mode: "qwen_direct", "gemma_direct", "google_qwen", "google_gemma"
-    cache_key: ถ้ามี จะ save ลง cache หลังเสร็จ
 
-    source_lang: ภาษาต้นฉบับ สำหรับ RapidOCR
+def process_translation(job_id: str, file_path: str, source_lang: str, target_lang: str, job_status: dict, translation_mode: str = "typhoon_direct", cache_key: str = None, ocr_engine: str = "docling"):
+    """
+    Background task สำหรับแปลเอกสาร (Typhoon Only)
     """
     import time
     from app.config import settings
-    from app.services.ocr_service import ocr_service
+    from app.services.ocr import ocr_service
     from app.services.render_service import render_service
     from app.utils.logger import get_job_logger
     from app.services.cache_service import save_to_cache
     
     # Map translation_mode to model
+    # We only support Typhoon now
     mode_to_model = {
-        "typhoon_direct": "scb10x/typhoon-translate1.5-4b:latest",  # ✅ Typhoon Translate for Thai↔English
-        "qwen_direct": "qwen2.5:3b",  # ✅ Reverted to 3B (GTX 1650 optimized)
-        "gemma_direct": "gemma2:2b",
-        "nllb_qwen": "qwen2.5:3b",    # ✅ Reverted to 3B (GTX 1650 optimized)
-        "nllb_gemma": "gemma2:2b",
-        "nllb_llama": "llama3.2:3b"
+        "typhoon_direct": "scb10x/typhoon-translate1.5-4b:latest",
     }
     
-    model = mode_to_model.get(translation_mode, "qwen2.5:3b")
-    use_nllb_refine = translation_mode in ["nllb_qwen", "nllb_gemma", "nllb_llama"]
+    model = mode_to_model.get("typhoon_direct") # Force Typhoon
     
     # Set model (auto-unloads previous model to free VRAM)
     translation_service.llm.set_model(model)
-    print(f"🔄 Translation Mode: {translation_mode}")
+    print(f"🔄 Translation Mode: Typhoon Direct")
     print(f"🤖 Using model: {model}")
-    if use_nllb_refine:
-        print(f"🌐 NLLB + LLM Refine enabled")
     
-    # แสดงข้อมูลภาษา
-    lang_names = {
-        "tha_Thai": "ไทย (Thai)",
-        "eng_Latn": "อังกฤษ (English)",
-        "zho_Hans": "จีนตัวย่อ (Chinese Simplified)",
-        "zho_Hant": "จีนตัวเต็ม (Chinese Traditional)",
-        "jpn_Jpan": "ญี่ปุ่น (Japanese)"
-    }
-    src_display = lang_names.get(source_lang, source_lang)
-    tgt_display = lang_names.get(target_lang, target_lang)
-    print(f"🌏 ภาษาต้นฉบับ: {src_display}")
-    print(f"🎯 ภาษาที่จะแปล: {tgt_display}")
+    print(f"🌏 ภาษาต้นฉบับ: {source_lang}")
+    print(f"🎯 ภาษาที่จะแปล: {target_lang}")
     print(f"📸 OCR Engine: {ocr_engine.upper()}")
     
     # สร้าง logger
     logger = get_job_logger(job_id)
     logger.log_languages(source_lang, target_lang)
-    logger.log_ocr_engine(ocr_engine)  # ✅ Log OCR engine
-    logger.log_translation_mode(translation_mode)  # ✅ Log translation mode
+    logger.log_ocr_engine(ocr_engine)
+    logger.log_translation_mode("typhoon_direct")
     
     try:
         # ✅ Check if cancelled before starting OCR
@@ -80,7 +60,7 @@ def process_translation(job_id: str, file_path: str, source_lang: str, target_la
             "message": "กำลังดึงข้อความ / OCR...",
             "stats": {  
                 "ocr_engine": ocr_engine,
-                "translation_mode": translation_mode
+                "translation_mode": "typhoon_direct"
             }
         }
         
@@ -117,7 +97,7 @@ def process_translation(job_id: str, file_path: str, source_lang: str, target_la
                 for block in blocks[:10]: # Check first 10 blocks per page
                     sample_text += block.get("text", "") + " "
 
-            # 2. Use LLM for robust detection (As requested by User)
+            # 2. Use LLM for robust detection
             detected_lang = translation_service.llm.detect_language(sample_text)
             
             # Print simplified log for clarity
@@ -144,13 +124,6 @@ def process_translation(job_id: str, file_path: str, source_lang: str, target_la
                         block["detected_lang"] = source_lang
                         block["was_translated"] = False
                     
-                    # Also skip tables
-                    if "tables" in page:
-                        for table in page["tables"]:
-                            # Skip table logic here or handled below? 
-                            # Since translate_tables is called later, we might need a flag or Handle it step 2
-                            pass
-
                 # Calculate stats
                 total_translated = 0
                 total_skipped = total_blocks
@@ -237,38 +210,15 @@ def process_translation(job_id: str, file_path: str, source_lang: str, target_la
                     print(f"   ⚠️ Page {page_no} not found in doc_result, skipping...")
                     continue
                 
-                # Translate text blocks - choose method based on mode
-                if use_nllb_refine:
-                    # NLLB + LLM Refine (now sync)
-                    translated_blocks, stats = translation_service.translate_blocks_nllb_refine(
-                        page_data["blocks"],
-                        target_lang,
-                        refine_model=model,
-                        source_lang=source_lang,  # ✅ ส่ง source_lang จาก job ตรงๆ ไม่ใช้ auto-detect
-                        job_status=job_status,
-                        job_id=job_id,
-                        page_no=page_no,
-                        total_pages=total_pages
-                    )
-                elif translation_mode == "typhoon_direct":
-                    # Typhoon Direct - use specialized translation method
-                    # ✅ Pass job_status and job_id for cancel support
-                    translated_blocks, stats = translation_service.translate_blocks_typhoon(
-                        page_data["blocks"], 
-                        target_lang,
-                        source_lang=source_lang,
-                        job_status=job_status,
-                        job_id=job_id
-                    )
-                else:
-                    # Direct LLM translation (Qwen/Gemma)
-                    # ✅ Pass job_status and job_id for cancel  support
-                    translated_blocks, stats = translation_service.translate_blocks(
-                        page_data["blocks"], 
-                        target_lang,
-                        job_status=job_status,
-                        job_id=job_id
-                    )
+                # Translate text blocks - Use Typhoon Direct
+                translated_blocks, stats = translation_service.translate_blocks_typhoon(
+                    page_data["blocks"], 
+                    target_lang,
+                    source_lang=source_lang,
+                    job_status=job_status,
+                    job_id=job_id
+                )
+
                 # Get page key (could be int or string from JSON)
                 page_key = page_no if page_no in doc_result["pages"] else str(page_no)
                 doc_result["pages"][page_key]["blocks"] = translated_blocks
@@ -281,8 +231,8 @@ def process_translation(job_id: str, file_path: str, source_lang: str, target_la
                     translated_tables = translation_service.translate_tables(
                         tables, 
                         target_lang,
-                        use_nllb_refine=use_nllb_refine,
-                        refine_model=model
+                        use_nllb_refine=False, # Disable NLLB
+                        refine_model=None
                     )
                     doc_result["pages"][page_key]["tables"] = translated_tables
                     total_table_cells += sum(len(t.get('cells', [])) for t in translated_tables)
@@ -297,8 +247,7 @@ def process_translation(job_id: str, file_path: str, source_lang: str, target_la
                         original=block.get("original_text", ""),
                         translated=block.get("text", ""),
                         detected_lang=block.get("detected_lang", "unknown"),
-                        was_translated=block.get("was_translated", True),
-                        nllb_translated=block.get("nllb_translated")  # Pass NLLB translation if exists
+                        was_translated=block.get("was_translated", True)
                     )
                 
                 # บันทึก log แต่ละตาราง
@@ -350,9 +299,9 @@ def process_translation(job_id: str, file_path: str, source_lang: str, target_la
                 "blocks_translated": total_translated,
                 "blocks_skipped": total_skipped,
                 "languages": final_stats.get("languages", {}),
-                "ocr_engine": doc_result.get("ocr_engine", ocr_engine),  # ✅ Add OCR engine
-                "translation_mode": translation_mode,  # ✅ Add translation mode
-                "detected_language": detected_lang if 'detected_lang' in locals() and source_lang == detected_lang else None # ✅ Add detected language if auto
+                "ocr_engine": doc_result.get("ocr_engine", ocr_engine),
+                "translation_mode": "typhoon_direct",
+                "detected_language": detected_lang if 'detected_lang' in locals() and source_lang == detected_lang else None
             }
         }
         
@@ -363,7 +312,7 @@ def process_translation(job_id: str, file_path: str, source_lang: str, target_la
         # ✅ Preserve stats even on error
         existing_stats = job_status.get(job_id, {}).get("stats", {
             "ocr_engine": ocr_engine,
-            "translation_mode": translation_mode
+            "translation_mode": "typhoon_direct"
         })
         job_status[job_id] = {
             "status": "error",

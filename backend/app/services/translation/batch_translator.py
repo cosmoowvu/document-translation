@@ -101,7 +101,7 @@ class BatchTranslator:
         """
         แปล text blocks ทั้งหมด
         - แบ่งเป็น batches
-        - Simple retry logic
+        - รองรับการ split block แล้วบางส่วนไม่ต้องแปล (Mixed content)
         - Returns: (translated_blocks, stats)
         """
         translated_blocks = []
@@ -110,211 +110,132 @@ class BatchTranslator:
         if not blocks:
             return translated_blocks, stats
         
-        # แยก blocks ที่ต้องแปล vs ข้าม
-        to_translate = []
-        chunk_map = {}  # Track split chunks: { orig_idx: [to_translate_idx, ...] }
+        # 1. Prepare Tasks (Flatten all chunks)
+        # Each item in all_tasks corresponds to a chunk of text
+        all_tasks = [] 
+        to_translate_indices = [] # Indices in all_tasks that need translation
         
         for idx, block in enumerate(blocks):
             text = normalize_text(block["text"])
             
-            # ตรวจสอบจำนวนคำ - แบ่ง block ถ้าเกิน MAX_WORDS_PER_BLOCK
+            # แบ่งข้อความถ้าจำเป็น
+            chunks = []
             word_count = count_words(text)
             if word_count > MAX_WORDS_PER_BLOCK:
                 print(f"   ⚠️ Block {idx+1} มีคำเกิน ({word_count} คำ) - กำลังแบ่ง...")
-                sub_chunks = split_long_block(text, max_words=MAX_WORDS_PER_BLOCK)
-                print(f"      → แบ่งเป็น {len(sub_chunks)} chunks")
-                
-                if idx not in chunk_map:
-                    chunk_map[idx] = []
-                    
-                for i, chunk in enumerate(sub_chunks):
-                    new_block = {
-                        **block,
-                        "text": chunk,
-                        "original_text": chunk
-                    }
-                    need, detected_lang = should_translate(chunk, target_lang)
-                    
-                    if need and chunk:
-                        to_translate.append((idx, new_block, chunk, detected_lang))
-                        chunk_map[idx].append(len(to_translate) - 1)
-                    else:
-                        translated_blocks.append({
-                            **new_block,
-                            "detected_lang": detected_lang,
-                            "was_translated": False
-                        })
-                        stats["skipped"] += 1
-                        stats["skipped_langs"][detected_lang] = stats["skipped_langs"].get(detected_lang, 0) + 1
+                chunks = split_long_block(text, max_words=MAX_WORDS_PER_BLOCK)
+                print(f"      → แบ่งเป็น {len(chunks)} chunks")
             else:
-                # Block ปกติ - เช็คว่าต้องแปลไหม
-                need, detected_lang = should_translate(text, target_lang)
+                chunks = [text]
+            
+            for chunk in chunks:
+                if not chunk: continue
                 
-                if need and text:
-                    to_translate.append((idx, block, text, detected_lang))
+                need, detected_lang = should_translate(chunk, target_lang)
+                
+                task = {
+                    'text': chunk,             # Content to translate (or keep)
+                    'original_text': chunk,
+                    'is_skipped': not need,
+                    'detected_lang': detected_lang,
+                    'original_idx': idx,       # Link back to original block
+                    'result_text': chunk if not need else None # Pre-fill if skipped
+                }
+                
+                all_tasks.append(task)
+                
+                if need:
+                    to_translate_indices.append(len(all_tasks) - 1)
                 else:
-                    translated_blocks.append({
-                        **block,
-                        "original_text": block["text"],
-                        "text": text,
-                        "detected_lang": detected_lang,
-                        "was_translated": False
-                    })
                     stats["skipped"] += 1
                     stats["skipped_langs"][detected_lang] = stats["skipped_langs"].get(detected_lang, 0) + 1
-        
+
         stats["total"] = len(blocks)
         
-        if not to_translate:
-            return translated_blocks, stats
-        
-        # หา source language
-        src_lang = to_translate[0][3] if to_translate[0][3] != "unknown" else "tha_Thai"
-        
-        # แบ่งเป็น batches
-        num_batches = (len(to_translate) + self.batch_size - 1) // self.batch_size
-        print(f"   📊 ต้องแปล: {len(to_translate)}, ข้าม: {stats['skipped']}, batches: {num_batches} (ละ {self.batch_size} blocks)")
-        
-        # สร้าง temp results
-        temp_results = [None] * len(to_translate)
-        
-        for batch_idx in range(num_batches):
-            # ✅ Check cancelled flag before each batch
-            if job_status and job_id and job_status.get(job_id, {}).get("cancelled", False):
-                print("   🚫 Job cancelled - stopping batch translation")
-                # Return what we have so far
-                return [r for r in all_results if r is not None], stats
+        # 2. Batch Translation
+        if to_translate_indices:
+            # Extract texts to translate
+            to_translate_texts = [all_tasks[i]['text'] for i in to_translate_indices]
             
-            start_idx = batch_idx * self.batch_size
-            end_idx = min(start_idx + self.batch_size, len(to_translate))
-            batch = to_translate[start_idx:end_idx]
+            # Find source lang from first item (heuristic)
+            first_task = all_tasks[to_translate_indices[0]]
+            src_lang = first_task['detected_lang'] if first_task['detected_lang'] != "unknown" else "tha_Thai"
             
-            print(f"   🔄 Batch {batch_idx + 1}/{num_batches} ({len(batch)} blocks)")
+            num_batches = (len(to_translate_texts) + self.batch_size - 1) // self.batch_size
+            print(f"   📊 ต้องแปล: {len(to_translate_texts)} chunks, ข้าม: {stats['skipped']}, batches: {num_batches}")
             
-            batch_texts = [text for (_, _, text, _) in batch]
-            batch_results = self.llm.translate_batch_llm(batch_texts, target_lang, src_lang)
+            current_translate_idx = 0
             
-            # Fallback: ถ้า batch failed → แปลทีละ block
-            if not any(batch_results) and batch_texts:
-                print(f"   ⚠️ Batch failed for {len(batch)} blocks. Switching to single mode...")
-                batch_results = []
-                for text in batch_texts:
-                    res = self.llm.translate_text(text, target_lang)
-                    batch_results.append(res)
-
-            # Process results
-            for j, (orig_idx, block, text, detected_lang) in enumerate(batch):
-                # text = normalized OCR text  to translate
-                # block["text"] = original un-normalized OCR text
+            for batch_idx in range(num_batches):
+                # Check Cancel
+                if job_status and job_id and job_status.get(job_id, {}).get("cancelled", False):
+                    print("   🚫 Job cancelled - stopping batch translation")
+                    return [], stats # Caller handles empty return
                 
-                paragraphs = text.split("\n\n")
+                start = batch_idx * self.batch_size
+                end = min(start + self.batch_size, len(to_translate_texts))
+                batch_texts = to_translate_texts[start:end]
                 
-                # Fallback split ถ้าไม่มี \n\n
-                if len(paragraphs) <= 1 and len(text) > 200 and "\n" in text:
-                    paragraphs = [p for p in text.split("\n") if p.strip()]
+                print(f"   🔄 Batch {batch_idx + 1}/{num_batches} ({len(batch_texts)} chunks)")
                 
-                translated = ""
+                # Execute Translation
+                batch_results = self.llm.translate_batch_typhoon(batch_texts, target_lang, src_lang, job_status, job_id)
                 
-                if len(paragraphs) > 1:
-                    # หลายย่อหน้า: แปลแยก
-                    print(f"      📄 Block {orig_idx+1}: Force splitting {len(paragraphs)} paragraphs...")
-                    translated_paragraphs = []
-                    for para in paragraphs:
-                        if para.strip():
-                            trans_para = self.llm.translate_text(para.strip(), target_lang)
-                            translated_paragraphs.append(trans_para if trans_para.strip() else para)
-                        else:
-                            translated_paragraphs.append("")
+                # Verify results length
+                if len(batch_results) != len(batch_texts):
+                    print(f"   ⚠️ Mismatch results: got {len(batch_results)}, expected {len(batch_texts)}")
+                    # Fill missing with empty string
+                    batch_results.extend([""] * (len(batch_texts) - len(batch_results)))
+                
+                # Assign results back to tasks
+                for res_text in batch_results:
+                    task_idx = to_translate_indices[current_translate_idx]
                     
-                    join_char = "\n\n" if "\n\n" in text else "\n"
-                    translated = join_char.join(translated_paragraphs)
-                else:
-                    # ย่อหน้าเดียว: ใช้ผล batch
-                    translated = batch_results[j] if j < len(batch_results) and batch_results[j] else ""
+                    # Log failure if empty and not skipped
+                    if not res_text.strip():
+                        print(f"      ⚠️ Chunk translation failed, using original")
+                        res_text = all_tasks[task_idx]['original_text']
                     
-                    # Fallback Level 1: Retry
-                    if not translated.strip():
-                        translated = self.llm.translate_text(text, target_lang)
-                    
-                    # Fallback Level 2: Secondary model
-                    if not translated.strip():
-                        secondary_model = "gemma2:2b" if "qwen" in self.llm.model.lower() else "qwen2.5:3b"
-                        print(f"      🔄 Block {orig_idx+1}: Trying secondary model ({secondary_model})...")
-                        
-                        original_model = self.llm.model
-                        self.llm.model = secondary_model
-                        translated = self.llm.translate_text(text, target_lang)
-                        self.llm.model = original_model
-                
-                # Final fallback: Use original
-                if not translated.strip():
-                   print(f"      ⚠️ Block {orig_idx+1}: All fallbacks failed, using original text")
-                   translated = text
-                
-                # CRITICAL FIX: Use the original text from the tuple, not block["text"]
-                temp_results[start_idx + j] = {
-                    **block,
-                    "original_text": text,  # ✅ Use normalized text as original for logging
-                    "text": translated,
-                    "detected_lang": detected_lang,
-                    "was_translated": True
-                }
-                stats["translated"] += 1
+                    all_tasks[task_idx]['result_text'] = res_text
+                    current_translate_idx += 1
+                    stats["translated"] += 1
         
-        # รวมผลลัพธ์
-        all_results = [None] * len(blocks)
+        # 3. Reconstruct Blocks
+        # Group tasks by original_idx
+        from collections import defaultdict
+        block_parts = defaultdict(list)
         
-        # ใส่ blocks ที่ข้าม
-        skip_idx = 0
+        for task in all_tasks:
+            block_parts[task['original_idx']].append(task['result_text'])
+            
+        final_results = []
         for idx, block in enumerate(blocks):
-            text = normalize_text(block["text"])
-            need, _ = should_translate(text, target_lang)
-            if not need or not text:
-                all_results[idx] = translated_blocks[skip_idx]
-                skip_idx += 1
-        
-        # ใส่ blocks ที่แปล (Merged)
-        final_block_results = {}
-        for j, (orig_idx, block, text, detected_lang) in enumerate(to_translate):
-            res = temp_results[j]
-            final_trans = res["text"]
-            
-            if orig_idx in chunk_map:
-                if orig_idx not in final_block_results:
-                     final_block_results[orig_idx] = {"parts": [], "block": block} 
-                final_block_results[orig_idx]["parts"].append(final_trans)
-            else:
-                 final_block_results[orig_idx] = {"text": final_trans, "block": block}
-        
-        for orig_idx, data in final_block_results.items():
-            block = blocks[orig_idx]  # Get original block
-            
-            if "parts" in data:
-                # Merged chunks - ✅ รักษา separator เดิมแทนการใช้ space
-                original_text = blocks[orig_idx]["text"]
-                # ตรวจสอบว่ามี paragraph separator หรือไม่
-                if "\n\n" in original_text:
-                    final_text = "\n\n".join(data["parts"])
-                elif "\n" in original_text:
-                    final_text = "\n".join(data["parts"])
-                else:
-                    final_text = " ".join(data["parts"])
+            if idx in block_parts:
+                parts = block_parts[idx]
                 
-                all_results[orig_idx] = {
+                # Join parts
+                # Try to preserve original separator if possible
+                original_text = block["text"]
+                if "\n\n" in original_text: joiner = "\n\n"
+                elif "\n" in original_text: joiner = "\n"
+                else: joiner = " "
+                
+                final_text = joiner.join(parts)
+                
+                final_results.append({
                     **block,
-                    "original_text": block["text"],  # ✅ Original OCR text
+                    "original_text": block["text"],
                     "text": final_text,
-                    "detected_lang": block.get("detected_lang", "unknown"),
+                    "detected_lang": block.get("detected_lang", "unknown"), # Use original detected or mixed?
                     "was_translated": True
-                }
+                })
             else:
-                # Single block
-                all_results[orig_idx] = {
-                    **data["block"],
-                    "original_text": block["text"],  # ✅ Original OCR text
-                    "text": data["text"],
-                    "detected_lang": data["block"].get("detected_lang", "unknown"),
-                    "was_translated": True
-                }
-        
-        return [r for r in all_results if r is not None], stats
+                # Caso weird: block had no text/chunks? Just append as is
+                final_results.append({
+                    **block,
+                    "original_text": block["text"],
+                    "text": block["text"],
+                    "was_translated": False
+                })
+                
+        return final_results, stats

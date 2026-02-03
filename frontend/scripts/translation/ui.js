@@ -75,19 +75,15 @@ export const TranslationUI = {
         progressDetail.textContent = message;
 
         // Update step indicators
+        // Update step indicators
         const stepAnalyze = document.getElementById('stepAnalyze');
         const stepExtract = document.getElementById('stepExtract');
         const stepTranslate = document.getElementById('stepTranslate');
-        const stepRefine = document.getElementById('stepRefine');
         const stepRender = document.getElementById('stepRender');
+        const stepRefine = document.getElementById('stepRefine');
 
-        const modelElement = document.getElementById('translationModel');
-        const isNLLBRefine = modelElement && (modelElement.value === 'nllb_qwen' || modelElement.value === 'nllb_gemma');
-
-        // Show/hide Refine step
-        if (stepRefine) {
-            stepRefine.style.display = isNLLBRefine ? 'inline-block' : 'none';
-        }
+        // Always hide refine step
+        if (stepRefine) stepRefine.style.display = 'none';
 
         // Dynamic label for extraction
         const fileName = document.getElementById('fileNameDisplay').textContent.trim();
@@ -98,74 +94,33 @@ export const TranslationUI = {
         }
 
         // Reset all steps
-        const allSteps = isNLLBRefine
-            ? [stepAnalyze, stepExtract, stepTranslate, stepRefine, stepRender]
-            : [stepAnalyze, stepExtract, stepTranslate, stepRender];
+        const allSteps = [stepAnalyze, stepExtract, stepTranslate, stepRender];
 
         allSteps.forEach(el => {
             if (el) el.classList.remove('active', 'done', 'pending');
         });
 
-        // Update step classes based on progress
-        if (isNLLBRefine) {
-            const msg = message.toLowerCase();
-            const isRefining = msg.includes('เกลา') || msg.includes('refine');
-
-            if (percent < 10) {
-                stepAnalyze.classList.add('active');
-                stepExtract.classList.add('pending');
-                stepTranslate.classList.add('pending');
-                stepRefine.classList.add('pending');
-                stepRender.classList.add('pending');
-            } else if (percent < 30) {
-                stepAnalyze.classList.add('done');
-                stepExtract.classList.add('active');
-                stepTranslate.classList.add('pending');
-                stepRefine.classList.add('pending');
-                stepRender.classList.add('pending');
-            } else if (isRefining || percent >= 55) {
-                if (percent < 80) {
-                    stepAnalyze.classList.add('done');
-                    stepExtract.classList.add('done');
-                    stepTranslate.classList.add('done');
-                    stepRefine.classList.add('active');
-                    stepRender.classList.add('pending');
-                } else {
-                    stepAnalyze.classList.add('done');
-                    stepExtract.classList.add('done');
-                    stepTranslate.classList.add('done');
-                    stepRefine.classList.add('done');
-                    stepRender.classList.add('active');
-                }
-            } else {
-                stepAnalyze.classList.add('done');
-                stepExtract.classList.add('done');
-                stepTranslate.classList.add('active');
-                stepRefine.classList.add('pending');
-                stepRender.classList.add('pending');
-            }
+        // Update step classes based on progress (Standard Flow)
+        if (percent < 10) {
+            stepAnalyze.classList.add('active');
+            stepExtract.classList.add('pending');
+            stepTranslate.classList.add('pending');
+            stepRender.classList.add('pending');
+        } else if (percent < 30) {
+            stepAnalyze.classList.add('done');
+            stepExtract.classList.add('active');
+            stepTranslate.classList.add('pending');
+            stepRender.classList.add('pending');
+        } else if (percent < 80) {
+            stepAnalyze.classList.add('done');
+            stepExtract.classList.add('done');
+            stepTranslate.classList.add('active');
+            stepRender.classList.add('pending');
         } else {
-            if (percent < 10) {
-                stepAnalyze.classList.add('active');
-                stepExtract.classList.add('pending');
-                stepTranslate.classList.add('pending');
-                stepRender.classList.add('pending');
-            } else if (percent < 30) {
-                stepAnalyze.classList.add('done');
-                stepExtract.classList.add('active');
-                stepTranslate.classList.add('pending');
-                stepRender.classList.add('pending');
-            } else if (percent < 80) {
-                stepAnalyze.classList.add('done');
-                stepExtract.classList.add('done');
-                stepTranslate.classList.add('active');
-                stepRender.classList.add('pending');
-            } else {
-                stepAnalyze.classList.add('done');
-                stepExtract.classList.add('done');
-                stepTranslate.classList.add('done');
-                stepRender.classList.add('active');
-            }
+            stepAnalyze.classList.add('done');
+            stepExtract.classList.add('done');
+            stepTranslate.classList.add('done');
+            stepRender.classList.add('active');
         }
 
         progressDetail.textContent = `${percent}% - ${message}`;
@@ -313,7 +268,20 @@ export const TranslationUI = {
     async loadResultStats(jobId) {
         // Get model info
         const modelElement = document.getElementById('translationModel');
-        const modelName = modelElement ? modelElement.options[modelElement.selectedIndex].text : 'Unknown Model';
+        // Handle both select (old) and invalid/missing/hidden input cases safely
+        let modelName = 'Typhoon (Direct)'; // Default for hidden input
+
+        if (modelElement) {
+            if (modelElement.tagName === 'SELECT') {
+                modelName = modelElement.options[modelElement.selectedIndex].text;
+            } else if (modelElement.value) {
+                // Map value to readable name if needed, or just use fixed name for now since we removed the select
+                const nameMap = {
+                    'typhoon_direct': 'Typhoon (Direct)'
+                };
+                modelName = nameMap[modelElement.value] || 'Typhoon (Direct)';
+            }
+        }
 
         let timeBadge = '';
         let langBadge = '';
@@ -378,6 +346,8 @@ export const TranslationUI = {
 
                 if (ocrEngine.includes('paddleocr') || ocrEngine.includes('paddle')) {
                     ocrName = 'PaddleOCR';
+                } else if (ocrEngine.includes('hybrid')) {
+                    ocrName = 'Hybrid (Docling + Typhoon)';
                 } else if (ocrEngine.includes('typhoon')) {
                     ocrName = 'Typhoon OCR';
                 } else if (ocrEngine.includes('docling')) {
@@ -424,7 +394,6 @@ export const TranslationUI = {
                     blocks.push({
                         num: currentBlock.num,
                         original: currentOriginal.trim(),
-                        nllb: currentNLLB.trim(),
                         translated: currentTranslated.trim(),
                         isTable: false
                     });
@@ -438,7 +407,6 @@ export const TranslationUI = {
                 blocks.push({
                     num: `Table ${tableMatch[1]}`,
                     original: `📊 ตาราง ${tableMatch[2]}x${tableMatch[3]}`,
-                    nllb: '',
                     translated: `📊 Table ${tableMatch[2]}x${tableMatch[3]}`,
                     isTable: true,
                     isHeader: true
@@ -453,7 +421,6 @@ export const TranslationUI = {
                     blocks.push({
                         num: currentBlock.num,
                         original: currentOriginal.trim(),
-                        nllb: currentNLLB.trim(),
                         translated: currentTranslated.trim(),
                         isTable: !!currentTable
                     });
@@ -465,7 +432,6 @@ export const TranslationUI = {
                     isCell: true
                 };
                 currentOriginal = '';
-                currentNLLB = '';
                 currentTranslated = '';
                 continue;
             }
@@ -477,7 +443,6 @@ export const TranslationUI = {
                     blocks.push({
                         num: currentBlock.num,
                         original: currentOriginal.trim(),
-                        nllb: currentNLLB.trim(),
                         translated: currentTranslated.trim(),
                         isTable: false
                     });
@@ -489,17 +454,12 @@ export const TranslationUI = {
                     lang: blockMatch[3]
                 };
                 currentOriginal = '';
-                currentNLLB = '';
                 currentTranslated = '';
             }
             // Match content lines
             else if (line.trim().startsWith('Original:')) {
                 currentOriginal = line.replace(/^\s*Original:\s*/, '');
                 currentSection = 'original';
-            }
-            else if (line.trim().startsWith('NLLB:')) {
-                currentNLLB = line.replace(/^\s*NLLB:\s*/, '');
-                currentSection = 'nllb';
             }
             else if (line.trim().startsWith('Result:')) {
                 currentTranslated = line.replace(/^\s*Result:\s*/, '');
@@ -514,8 +474,6 @@ export const TranslationUI = {
                 // Append to current section
                 if (currentSection === 'result') {
                     currentTranslated += '\n' + line;
-                } else if (currentSection === 'nllb') {
-                    currentNLLB += '\n' + line;
                 } else if (currentSection === 'original') {
                     currentOriginal += '\n' + line;
                 }
@@ -527,7 +485,6 @@ export const TranslationUI = {
             blocks.push({
                 num: currentBlock.num,
                 original: currentOriginal.trim(),
-                nllb: currentNLLB.trim(),
                 translated: currentTranslated.trim(),
                 isTable: !!currentTable
             });
@@ -542,8 +499,6 @@ export const TranslationUI = {
         const tableClass = isTable ? 'table-cell' : '';
         const headerClass = isHeader ? 'table-header' : '';
         const labelPrefix = isTable && !isHeader ? 'Cell' : (isTable ? '' : 'Block');
-
-        const hasNLLB = nllbText && nllbText.trim().length > 0;
 
         const escapeHTML = (text) => {
             const div = document.createElement('div');
@@ -562,22 +517,6 @@ export const TranslationUI = {
                         </div>
                         <div class="card-content">${escapeHTML(originalText)}</div>
                     </div>
-                    ${hasNLLB ? `
-                    <div class="text-card nllb-card">
-                        <div class="card-header">
-                            <span class="card-icon">🌐</span>
-                            <span class="card-title">ข้อความแปลภาษา</span>
-                        </div>
-                        <div class="card-content">${escapeHTML(nllbText)}</div>
-                    </div>
-                    <div class="text-card refined-card">
-                        <div class="card-header">
-                            <span class="card-icon">📝</span>
-                            <span class="card-title">ข้อความที่เกลาคำ</span>
-                        </div>
-                        <div class="card-content">${escapeHTML(translatedText)}</div>
-                    </div>
-                    ` : `
                     <div class="text-card result-card">
                         <div class="card-header">
                             <span class="card-icon">📝</span>
@@ -585,7 +524,6 @@ export const TranslationUI = {
                         </div>
                         <div class="card-content">${escapeHTML(translatedText)}</div>
                     </div>
-                    `}
                 </div>
             </div>
         `;
@@ -681,7 +619,7 @@ export const TranslationUI = {
                 const blocks = this.parseBlockLog(logText, pageNum);
 
                 blocks.forEach(block => {
-                    combinedHTML += this.createCombinedBlockHTML(block.num, block.original, block.nllb, block.translated, pageNum, block.isTable, block.isHeader);
+                    combinedHTML += this.createCombinedBlockHTML(block.num, block.original, undefined, block.translated, pageNum, block.isTable, block.isHeader);
                 });
             }
 
