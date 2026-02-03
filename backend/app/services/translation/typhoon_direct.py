@@ -66,7 +66,7 @@ def translate_batch_typhoon(
         "zho_Hans": "Chinese (Simplified)",
         "zho_Hant": "Chinese (Traditional)",
         "jpn_Jpan": "Japanese",
-        "kor_Hang": "Korean",
+        "kor_Hang": "Korean (Hangul)",
         "lao_Laoo": "Lao",
         "mya_Mymr": "Burmese",
         "khm_Khmr": "Khmer",
@@ -86,17 +86,31 @@ def translate_batch_typhoon(
     combined_text = "\n".join(lines_text)
     num_blocks = len(texts)
     
+    # Specialized instruction for Korean
+    extra_instruction = ""
+    example_section = "Example format:\n###BLOCK1### [translation of block 1]\n###BLOCK2### [translation of block 2]\n\n"
+    
+    if "kor" in target_lang.lower() or "korean" in target_name.lower():
+        extra_instruction = "5. For Korean, you MUST use Hangul script (e.g., 안녕하세요). Do NOT use Latin/Romanization.\n"
+        # One-shot example for Korean to force translation behavior
+        example_section = (
+            "Example:\n"
+            "Input:\n###BLOCK1### สวัสดีทักทาย\n"
+            "Output:\n###BLOCK1### 안녕하세요\n\n"
+        )
+
     # Typhoon Translate prompt - IMPROVED to force separate block output
     prompt = (
-        f"Translate each block below into {target_name}.\n\n"
+        f"Translate each block below from {lang_names.get(src_lang, src_lang)} into {target_name}.\n\n"
         "CRITICAL RULES:\n"
         f"1. You MUST output exactly {num_blocks} blocks with markers ###BLOCK1### to ###BLOCK{num_blocks}###\n"
         "2. Translate each block SEPARATELY - do NOT merge blocks together\n"
         "3. Each block's translation must appear after its ###BLOCKn### marker\n"
-        "4. Output ONLY the translations, no explanations\n\n"
-        "Example format:\n"
-        "###BLOCK1### [translation of block 1]\n"
-        "###BLOCK2### [translation of block 2]\n\n"
+        "4. Output ONLY the translations, no explanations\n"
+        f"{extra_instruction}"
+        "6. Do NOT return the original source text. You must translate it.\n"
+        f"7. Translate ALL text from ANY source language (including mixed languages) into {target_name}. Ensure the entire output is in {target_name} script/language only. Transliterate proper names or technical terms if needed.\n\n"
+        f"{example_section}"
         f"Input ({num_blocks} blocks):\n{combined_text}\n\n"
         f"Output ({num_blocks} blocks in {target_name}):"
     )
@@ -146,6 +160,8 @@ def translate_batch_typhoon(
                 # Extract translations using regex from cleaned response
                 results = [""] * len(texts)
                 missing_blocks = []
+                failed_validation_indices = []
+
                 for i in range(len(texts)):
                     match = re.search(rf"###BLOCK{i+1}###\s*(.*?)(?=\s*###BLOCK{i+2}###|$)", cleaned_response, re.DOTALL)
                     if match:
@@ -154,23 +170,70 @@ def translate_batch_typhoon(
                         block_content = re.sub(r'^(Here is the translation:|Translation:|Output:)\s*', '', block_content, flags=re.IGNORECASE)
                         block_content = re.sub(r'^\*+|\*+$', '', block_content)
                         results[i] = block_content.strip()
+
+                        # --- Validation v2: Strict Checking ---
+                        # Logic: Output should NOT contain scripts from other CJK/Thai languages unless it matches target.
+                        if target_lang != "tha_Thai":
+                             # Check for LEAKED THAI chars
+                             thai_count = sum(1 for c in block_content if '\u0e00' <= c <= '\u0e7f')
+                             if thai_count > 0:
+                                 print(f"   ⚠️ Block {i+1} validation failed: Found Thai characters in {target_lang} output")
+                                 failed_validation_indices.append(i)
+                                 missing_blocks.append(i)
+                                 continue # Skip other checks
+                        
+                        if target_lang != "kor_Hang":
+                            # Check for LEAKED KOREAN chars
+                            kor_count = sum(1 for c in block_content if '\uac00' <= c <= '\ud7af')
+                            if kor_count > 0:
+                                print(f"   ⚠️ Block {i+1} validation failed: Found Korean characters in {target_lang} output")
+                                failed_validation_indices.append(i)
+                                missing_blocks.append(i)
+                                continue
+
+                        if src_lang != target_lang:
+                            content_len = len(block_content)
+                            if content_len > 5:
+                                # Standard Check: Is it mostly Source Script?
+                                bad_count = 0
+                                if "tha" in src_lang: bad_count = sum(1 for c in block_content if '\u0e00' <= c <= '\u0e7f')
+                                elif "kor" in src_lang: bad_count = sum(1 for c in block_content if '\uac00' <= c <= '\ud7af')
+                                elif "jpn" in src_lang: bad_count = sum(1 for c in block_content if '\u3040' <= c <= '\u30ff')
+                                
+                                # Threshold: 20% (Lowered from 50% to be stricter)
+                                if bad_count / content_len > 0.2:
+                                    print(f"   ⚠️ Block {i+1} validation failed: Output is still {src_lang} ({bad_count}/{content_len} chars)")
+                                    failed_validation_indices.append(i)
+                                    missing_blocks.append(i) 
+
                     else:
                         missing_blocks.append(i)
                 
-                # ✅ Retry logic: if >30% blocks missing, retry entire batch once
+                # ✅ Retry logic: if >30% blocks missing OR validation failed
+                # If specifically failed validation, we definitely want to retry
                 missing_rate = len(missing_blocks) / len(texts) if texts else 0
-                if missing_blocks and missing_rate > 0.3 and attempt < max_retries:
-                    print(f"   🔄 Retry {attempt + 1}/{max_retries}: {len(missing_blocks)}/{len(texts)} blocks missing ({missing_rate*100:.0f}%)")
+                
+                if (missing_blocks or failed_validation_indices) and attempt < max_retries:
+                    if failed_validation_indices:
+                         print(f"   🔄 Retry {attempt + 1}/{max_retries}: Found {len(failed_validation_indices)} blocks not translated (Language Mismatch)")
+                         # Optional: Append "Please actually translate this time" to prompt for retry?
+                         # For now, simple retry implies re-sampling
+                    elif missing_rate > 0.3:
+                        print(f"   🔄 Retry {attempt + 1}/{max_retries}: {len(missing_blocks)} blocks missing")
+                    
                     continue  # Retry with same prompt
                 
-                # Fill missing blocks with original text
+                # Fill missing blocks with original text ONLY if result is truly empty
                 for i in missing_blocks:
-                    print(f"   ⚠️ Block {i+1} not found, using original text")
-                    results[i] = texts[i]
+                    if not results[i]:
+                        print(f"   ⚠️ Block {i+1} not found (empty), using original text")
+                        results[i] = texts[i]
+                    else:
+                        print(f"   ⚠️ Block {i+1} failed validation (kept imperfect result) instead of reverting")
                 
                 # Log summary
                 if missing_blocks:
-                    print(f"   ⚠️ Typhoon: {len(missing_blocks)}/{len(texts)} blocks fell back to original")
+                    print(f"   ⚠️ Typhoon: {len(missing_blocks)}/{len(texts)} blocks had issues (missing or failed validation)")
                 
                 return results
 

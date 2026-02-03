@@ -98,7 +98,8 @@ class RenderService:
         # Font scaling for large pages
         font_multiplier = max(1.0, page_width / (self.dpi * 8.27))
         scaled_font_size = int(calculated_base_size * font_multiplier)
-        font = self.font_service.get_font(scaled_font_size)
+        # Pass text to detect CJK (use first block text as representative)
+        font = self.font_service.get_font(scaled_font_size, text=text)
         
         print(f"   🔤 Final Font Size: {scaled_font_size}px (CalculatedBase={calculated_base_size}, Multiplier={font_multiplier:.2f})")
         
@@ -210,6 +211,8 @@ class RenderService:
                     cursor_y += paragraph_spacing
             
             # Wrap text (delegated to font_service)
+            # Re-get font for this paragraph specifically (handling mixed English/CJK paragraphs)
+            font = self.font_service.get_font(scaled_font_size, text=para_text)
             wrapped_lines = self.font_service.wrap_text(para_text, font, max_width, draw)
             
             for line in wrapped_lines:
@@ -294,7 +297,7 @@ class RenderService:
                     if pre_text:
                         # Use a reasonable font size for caption
                         caption_font_size = int(max(scaled_min, scaled_max * 0.7))
-                        caption_font = self.font_service.get_font(caption_font_size)
+                        caption_font = self.font_service.get_font(caption_font_size, text=pre_text)
                         
                         wrapped_caption = self.font_service.wrap_text(pre_text, caption_font, box_width, draw)
                         
@@ -452,12 +455,12 @@ class RenderService:
             max_font = int(14 * font_multiplier) # Slightly smaller for tables
             min_font = int(8 * font_multiplier)
             
-            # Simple font fitting
-            font = self.font_service.get_font(min_font) # Default to min if small space
+            # Simple font fitting (Check text for CJK)
+            font = self.font_service.get_font(min_font, text=text) # Default to min if small space
             
             # Try to find best fit
             for font_size in range(max_font, min_font - 1, -1):
-                font = self.font_service.get_font(font_size)
+                font = self.font_service.get_font(font_size, text=text)
                 wrapped_lines = self.font_service.wrap_text(text, font, available_width, draw)
                 
                 total_height = 0

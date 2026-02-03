@@ -18,48 +18,87 @@ class FontService:
     def get_font(self, size: int = 16, text: str = None) -> ImageFont.FreeTypeFont:
         """โหลด font พร้อม caching และ fallback ภาษาต่างๆ (Auto-detect CJK)"""
         
-        # Check if text contains CJK characters
-        is_cjk = False
-        if text:
-            for char in text:
-                if '\u4e00' <= char <= '\u9fff' or '\u3040' <= char <= '\u30ff' or '\uac00' <= char <= '\ud7af':
-                    is_cjk = True
-                    break
+        # Check for specific languages to prioritize fonts
+        is_korean = False
+        is_japanese = False
+        is_cjk_general = False
         
-        # Creates a specialized cache key for CJK mode to avoid polluting normal Thai cache
-        cache_key = f"{size}_cjk" if is_cjk else size
+        if text:
+            # Hangul Syllables (Korean)
+            if any('\uac00' <= char <= '\ud7af' for char in text):
+                is_korean = True
+                
+            # Hiragana/Katakana (Japanese)
+            if any('\u3040' <= char <= '\u30ff' for char in text):
+                is_japanese = True
+                
+            # CJK Unified Ideographs (Chinese/Japanese/Korean)
+            if any('\u4e00' <= char <= '\u9fff' for char in text):
+                is_cjk_general = True
+
+        is_cjk = is_korean or is_japanese or is_cjk_general
+        
+        # Creates a specialized cache key
+        cache_suffix = ""
+        if is_korean: cache_suffix = "_kor"
+        elif is_japanese: cache_suffix = "_jpn"
+        elif is_cjk_general: cache_suffix = "_cjk"
+        
+        cache_key = f"{size}{cache_suffix}"
         
         if cache_key in self._font_cache:
             return self._font_cache[cache_key]
         
         fonts_to_try = []
         
-        # Windows System Fonts
-        # Windows System Fonts
-        cjk_fonts = [
-            "C:/Windows/Fonts/msgothic.ttc",     # MS Gothic (Japanese) - USER HAS THIS
-            "C:/Windows/Fonts/msjh.ttc",         # Microsoft JhengHei (Traditional Chinese) - USER HAS THIS
-            "C:/Windows/Fonts/msyh.ttc",         # Microsoft YaHei (Chinese) - USER HAS THIS
-            "C:/Windows/Fonts/malgun.ttf",       # Malgun Gothic (Korean) - USER HAS THIS
-            "C:/Windows/Fonts/meiryo.ttc",       # Meiryo (Japanese)
-            "C:/Windows/Fonts/simsun.ttc",       # SimSun (Chinese)
-            "C:/Windows/Fonts/gulim.ttc",        # Gulim (Korean)
-            "C:/Windows/Fonts/arialuni.ttf",     # Arial Unicode MS (Universal)
-            "C:/Windows/Fonts/micross.ttf",      # Microsoft Sans Serif (General Fallback) - USER HAS THIS
+        # Define font groups
+        fonts_korean = [
+            "C:/Windows/Fonts/malgun.ttf",       # Malgun Gothic
+            "C:/Windows/Fonts/gulim.ttc",        # Gulim
+            "C:/Windows/Fonts/batang.ttc",       # Batang
+        ]
+        
+        fonts_japanese = [
+            "C:/Windows/Fonts/msgothic.ttc",     # MS Gothic
+            "C:/Windows/Fonts/meiryo.ttc",       # Meiryo
+        ]
+        
+        fonts_chinese = [
+            "C:/Windows/Fonts/msyh.ttc",         # Microsoft YaHei
+            "C:/Windows/Fonts/simsun.ttc",       # SimSun
+            "C:/Windows/Fonts/simhei.ttf",       # SimHei
+        ]
+        
+        fonts_universal = [
+            "C:/Windows/Fonts/arialuni.ttf",     # Arial Unicode MS
+            "C:/Windows/Fonts/micross.ttf",      # Microsoft Sans Serif
         ]
         
         thai_fonts = [
             self.font_path,                      # Configured Font (Primary)
-            "C:/Windows/Fonts/LeelawadeeUI.ttf", # Good Thai support
-            "C:/Windows/Fonts/tahoma.ttf",       # Standard
+            "C:/Windows/Fonts/LeelawadeeUI.ttf", 
+            "C:/Windows/Fonts/tahoma.ttf",       
         ]
         
-        # Prioritize based on content
-        if is_cjk:
-            fonts_to_try = cjk_fonts + thai_fonts # Try CJK first
-            print(f"DEBUG: CJK text detected, trying fonts: {cjk_fonts}")
+        # Build priority list based on detected language
+        if is_korean:
+            # Korean > Universal > Chinese/Japanese (as fallback) > Thai
+            fonts_to_try = fonts_korean + fonts_universal + fonts_chinese + fonts_japanese + thai_fonts
+            print(f"DEBUG: Korean text detected, prioritization: {fonts_to_try[0]}...")
+            
+        elif is_japanese:
+            # Japanese > Universal > Chinese > Korean > Thai
+            fonts_to_try = fonts_japanese + fonts_universal + fonts_chinese + fonts_korean + thai_fonts
+            print(f"DEBUG: Japanese text detected, prioritization: {fonts_to_try[0]}...")
+            
+        elif is_cjk_general:
+            # Chinese (Default CJK) > Universal > Japanese > Korean > Thai
+            fonts_to_try = fonts_chinese + fonts_universal + fonts_japanese + fonts_korean + thai_fonts
+            print(f"DEBUG: Generic CJK detected, prioritization: {fonts_to_try[0]}...")
+            
         else:
-            fonts_to_try = thai_fonts + cjk_fonts # Try Thai first
+            # Standard Thai/English -> CJK fallbacks just in case
+            fonts_to_try = thai_fonts + fonts_universal + fonts_chinese
             
         # Add fallback universal
         fonts_to_try.append("C:/Windows/Fonts/seguiemj.ttf")
@@ -93,18 +132,31 @@ class FontService:
     def wrap_text(self, text: str, font, max_width: int, draw) -> List[str]:
         """ตัดคำให้พอดี width - รองรับภาษาไทย (PyThaiNLP) และภาษาอื่นๆ"""
         try:
-            from pythainlp.tokenize import word_tokenize
-            from pythainlp.util import normalize as normalize_thai
+            # Check for CJK characters (Japanese, Chinese, Korean)
+            # These languages generally don't use spaces, so we wrap by character
+            is_cjk = any('\u4e00' <= char <= '\u9fff' or '\u3040' <= char <= '\u30ff' or '\uac00' <= char <= '\ud7af' for char in text)
             
-            # Normalize Thai text (Fix vowel sequence order)
-            if any('\u0E00' <= char <= '\u0E7F' for char in text):
-                text = normalize_thai(text)
+            if is_cjk:
+                # Tokenize by character for CJK
+                words = list(text)
+            else:
+                from pythainlp.tokenize import word_tokenize
+                from pythainlp.util import normalize as normalize_thai
+                
+                # Normalize Thai text (Fix vowel sequence order)
+                if any('\u0E00' <= char <= '\u0E7F' for char in text):
+                    text = normalize_thai(text)
 
-            # ใช้ engine 'newmm' (dictionary-based) ซึ่งเร็วและแม่นยำพอสมควร
-            words = word_tokenize(text, engine="newmm", keep_whitespace=True)
+                # ใช้ engine 'newmm' (dictionary-based) ซึ่งเร็วและแม่นยำพอสมควร
+                words = word_tokenize(text, engine="newmm", keep_whitespace=True)
+                
         except ImportError:
             # Fallback (rarely happens if requirements installed)
-            words = re.findall(r'\S+|\s+', text)
+            # If CJK (checked manually here again if needed, but handled above), convert to chars
+            if any('\u4e00' <= char <= '\u9fff' or '\u3040' <= char <= '\u30ff' for char in text):
+                 words = list(text)
+            else:
+                 words = re.findall(r'\S+|\s+', text)
 
         lines = []
         current_line = ""
