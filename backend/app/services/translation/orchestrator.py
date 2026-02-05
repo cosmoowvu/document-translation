@@ -40,6 +40,7 @@ class TranslationOrchestrator:
         return translator.translate_blocks(
             blocks, 
             target_lang,
+            source_lang=source_lang,  # Forward source_lang
             job_status=job_status,
             job_id=job_id
         )

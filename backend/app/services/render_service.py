@@ -229,6 +229,12 @@ class RenderService:
                 
                 draw.text((x_start, cursor_y), line, font=font, fill="black")
                 cursor_y += line_height + line_spacing
+                
+                # SAFETY: Prevent infinite loop if text is too long or line height is broken
+                page_created_count = len(images)
+                if page_created_count > 20: 
+                    print(f"   ⚠️ Emergency Break: Paragraph {para_idx+1} generated > 20 pages. Stopping.")
+                    break
         
         images.append(canvas)
         print(f"   ✅ Flow rendered {len(paragraphs)} paragraphs into {len(images)} page(s)")
@@ -361,6 +367,13 @@ class RenderService:
     def _parse_html_table(self, html_text: str) -> Dict:
         """Parse HTML table string into structured dict"""
         import re
+        
+        # ✅ Cleanup: Remove newlines INSIDE tags to fix parsing issues
+        # Problem: LLM may output <td>Text\n(2010)</td> which breaks regex
+        # Solution: Replace newlines between tags with space
+        html_text = re.sub(r'>\s+<', '><', html_text)  # Remove whitespace between tags
+        html_text = html_text.replace('\r\n', ' ').replace('\n', ' ')  # Replace newlines with space
+        
         
         # Simple regex parsing (robust enough for LLM output)
         rows = re.findall(r'<tr.*?>(.*?)</tr>', html_text, re.DOTALL | re.IGNORECASE)

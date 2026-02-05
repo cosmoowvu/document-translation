@@ -157,12 +157,17 @@ class LLMService:
             lines_text.append(f"###BLOCK{idx + 1}### {text}")
         
         combined_text = "\n".join(lines_text)
+        src_name = self._get_lang_name(src_lang)
         
         # Generic Batch Prompt (works for all models)
         prompt = (
-            f"Translate the following text to {target_name}.\n"
-            "Do not translate proper names (preserve them in original language).\n"
-            "Output ONLY the translation with the same ###BLOCKn### markers, no explanations.\n\n"
+            f"Translate the following text from {src_name} to {target_name}.\n"
+            "CRITICAL RULES:\n"
+            "1. Output ONLY the translation with the same ###BLOCKn### markers.\n"
+            "2. Translate EVERY sentence completely. Do NOT summarize.\n"
+            "3. Do not translate proper names (preserve them in original language).\n"
+            "4. Do NOT repeat the input text or output looped nonsense.\n"
+            "5. If the input is nonsense, return the input as is.\n\n"
             f"{combined_text}\n"
         )
         
@@ -196,13 +201,45 @@ class LLMService:
                     else:
                         print(f"   ⚠️ Block {i+1} not found in response.")
                 
-                # CRITICAL CHECK: Reject Chinese output if target is not Chinese/Japanese
-                if target_lang not in ["zho_Hans", "zho_Hant", "jpn_Jpan"]:
-                    for i, res in enumerate(results):
+                # CRITICAL CHECK: Generic Script Validation (Same as Typhoon)
+                # Ban any script that is NOT the target script.
+                script_definitions = [
+                    {"code": "tha", "name": "Thai", "start": '\u0e00', "end": '\u0e7f'},
+                    {"code": "kor", "name": "Korean", "start": '\uac00', "end": '\ud7af'},
+                    {"code": "jpn", "name": "Japanese (Kana)", "start": '\u3040', "end": '\u30ff'},
+                    {"code": "zho", "name": "Chinese", "start": '\u4e00', "end": '\u9fff'},
+                    {"code": "lao", "name": "Lao", "start": '\u0e80', "end": '\u0eff'},
+                    {"code": "khm", "name": "Khmer", "start": '\u1780', "end": '\u17ff'},
+                    {"code": "mya", "name": "Burmese", "start": '\u1000', "end": '\u109f'},
+                ]
+
+                for i, res in enumerate(results):
+                    if not res: continue
+                    
+                    # 1. Reject Chinese output if target is not Chinese/Japanese
+                    if target_lang not in ["zho_Hans", "zho_Hant", "jpn_Jpan"]:
                         if re.search(r'[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]', res):
-                            print(f"   ⚠️ Batch: Rejected Chinese output for block {i+1}: {res[:50]}...")
-                            results[i] = "" # Clear the result if it's Chinese
-                
+                            print(f"   ⚠️ Batch: Rejected Chinese output for block {i+1}")
+                            results[i] = ""
+                            continue
+
+                    # 2. Generic Script Validation
+                    for script in script_definitions:
+                        # Skip if this script IS the target language
+                        if script["code"] in target_lang.lower():
+                            continue
+                        
+                        # Special check: Allow Chinese in Japanese
+                        if "jpn" in target_lang.lower() and script["code"] == "zho":
+                            continue
+
+                        # Check for banned script chars
+                        count = sum(1 for c in res if script["start"] <= c <= script["end"])
+                        if count > 0:
+                            print(f"   ⚠️ Batch: Rejected {script['name']} output for block {i+1} (Source Leak)")
+                            results[i] = "" # INVALID -> Trigger fallback failure
+                            break
+
                 return results
             else:
                 print(f"   ❌ API Error: {resp.status_code} - {resp.text}")
@@ -214,8 +251,8 @@ class LLMService:
     
     # ====== Delegation Methods to Translation Modules ======
     
-    def translate_batch_typhoon(self, texts: List[str], target_lang: str, src_lang: str = "tha_Thai", job_status: dict = None, job_id: str = None) -> List[str]:
-        """Delegate to typhoon_direct module"""
+    def translate_batch_typhoon(self, texts: List[str], target_lang: str, src_lang: str = "tha_Thai", job_status: dict = None, job_id: str = None) -> (List[str], List[int]):
+        """Delegate to typhoon_direct module. Returns (results, failed_indices)"""
         return typhoon_translate(texts, target_lang, src_lang, self.url, self.model, job_status, job_id)
 
 

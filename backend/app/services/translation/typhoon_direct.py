@@ -86,7 +86,7 @@ def translate_batch_typhoon(
     combined_text = "\n".join(lines_text)
     num_blocks = len(texts)
     
-    # Specialized instruction for Korean
+    # Specialized instruction for specific languages
     extra_instruction = ""
     example_section = "Example format:\n###BLOCK1### [translation of block 1]\n###BLOCK2### [translation of block 2]\n\n"
     
@@ -98,6 +98,14 @@ def translate_batch_typhoon(
             "Input:\n###BLOCK1### สวัสดีทักทาย\n"
             "Output:\n###BLOCK1### 안녕하세요\n\n"
         )
+    elif "jpn" in target_lang.lower() or "japanese" in target_name.lower():
+        extra_instruction = "5. For Japanese, you MUST use Japanese script (Hiragana/Katakana/Kanji, e.g., こんにちは、テーブル、表). Do NOT use other languages.\n"
+        # One-shot example for Japanese
+        example_section = (
+            "Example:\n"
+            "Input:\n###BLOCK1### The table shows data\n"
+            "Output:\n###BLOCK1### 表はデータを示しています\n\n"
+        )
 
     # Typhoon Translate prompt - IMPROVED to force separate block output
     prompt = (
@@ -108,21 +116,21 @@ def translate_batch_typhoon(
         "3. Each block's translation must appear after its ###BLOCKn### marker\n"
         "4. Output ONLY the translations, no explanations\n"
         f"{extra_instruction}"
-        "6. Do NOT return the original source text. You must translate it.\n"
-        f"7. Translate ALL text from ANY source language (including mixed languages) into {target_name}. Ensure the entire output is in {target_name} script/language only. Transliterate proper names or technical terms if needed.\n\n"
+        f"6. Translate ALL text into {target_name}, including proper names (e.g., 'Hua' → transcribe phonetically). Preserve ONLY acronyms (2-6 uppercase letters like EOQ, JELS, PhD).\n\n"
         f"{example_section}"
         f"Input ({num_blocks} blocks):\n{combined_text}\n\n"
         f"Output ({num_blocks} blocks in {target_name}):"
     )
+
     
     print(f"   📤 Sending Batch Prompt (Typhoon - {len(texts)} blocks)...")
     
     # ✅ Check cancelled flag before translation
     if job_status and job_id and job_status.get(job_id, {}).get("cancelled", False):
         print("   🚫 Job cancelled - stopping Typhoon translation")
-        return [""] * len(texts)
+        return [""] * len(texts), list(range(len(texts)))
     
-    max_retries = 1  # Retry once if >30% blocks missing
+    max_retries = 2  # Increased retries for robustness
     
     for attempt in range(max_retries + 1):
         try:
@@ -133,26 +141,24 @@ def translate_batch_typhoon(
                     "prompt": prompt,
                     "stream": False,
                     "options": {
-                        "temperature": 0.6,  #ควบคุมการสุ่มสำหรับการตอบกลับที่สร้างสรรค์มากขึ้น
-                        "repeat_penalty": 1.05, #ป้องกันข้อความซ้ำซาก
-                        "num_predict": 4096,  #ควบคุมจำนวนคำที่จะสร้าง
-                        "top_p": 0.9          #ควบคุมความหลากหลายของการตอบกลับ
+                        "temperature": 0.4,  # Lowered slightly for more stability
+                        "repeat_penalty": 1.15, # Increased to prevent loops/repetition
+                        "num_predict": 4096,  
+                        "top_p": 0.9          
                     }
                 },
-                timeout=300  # ✅ Increased from 180s to 300s (5 min) for cold boot
+                timeout=300
             )
             
             if resp.status_code == 200:
                 response_text = resp.json().get("response", "").strip()
-                # ... (rest of success logic) ...
                 
-                # ✅ Debug: Check for duplicate blocks
+                # ... [Keep existing deduplication logic] ...
                 if '###BLOCK1###' in response_text:
                     block1_count = response_text.count('###BLOCK1###')
                     if block1_count > 1:
                         print(f"   🔍 DEBUG: Found {block1_count} occurrences of BLOCK1 in response")
                 
-                # ✅ Remove duplicate blocks before parsing (moved logic here for cleaner flow)
                 cleaned_response, num_duplicates = remove_duplicate_blocks(response_text)
                 if num_duplicates > 0:
                     print(f"   ⚠️ Removed {num_duplicates} duplicate blocks from Typhoon response")
@@ -166,77 +172,53 @@ def translate_batch_typhoon(
                     match = re.search(rf"###BLOCK{i+1}###\s*(.*?)(?=\s*###BLOCK{i+2}###|$)", cleaned_response, re.DOTALL)
                     if match:
                         block_content = match.group(1).strip()
-                        # Clean up common prefixes/suffixes from LLM
                         block_content = re.sub(r'^(Here is the translation:|Translation:|Output:)\s*', '', block_content, flags=re.IGNORECASE)
                         block_content = re.sub(r'^\*+|\*+$', '', block_content)
-                        results[i] = block_content.strip()
-
-                        # --- Validation v2: Strict Checking ---
-                        # Logic: Output should NOT contain scripts from other CJK/Thai languages unless it matches target.
-                        if target_lang != "tha_Thai":
-                             # Check for LEAKED THAI chars
-                             thai_count = sum(1 for c in block_content if '\u0e00' <= c <= '\u0e7f')
-                             if thai_count > 0:
-                                 print(f"   ⚠️ Block {i+1} validation failed: Found Thai characters in {target_lang} output")
-                                 failed_validation_indices.append(i)
-                                 missing_blocks.append(i)
-                                 continue # Skip other checks
+                        block_content = block_content.strip()
                         
-                        if target_lang != "kor_Hang":
-                            # Check for LEAKED KOREAN chars
-                            kor_count = sum(1 for c in block_content if '\uac00' <= c <= '\ud7af')
-                            if kor_count > 0:
-                                print(f"   ⚠️ Block {i+1} validation failed: Found Korean characters in {target_lang} output")
-                                failed_validation_indices.append(i)
-                                missing_blocks.append(i)
-                                continue
+                        # Safety check: Detect hallucination (output way longer than input)
+                        src_len = len(texts[i])
+                        result_len = len(block_content)
+                        
+                        # If result is >10x longer than input, likely hallucination - truncate
+                        if result_len > src_len * 10 and result_len > 500:
+                            print(f"   🚨 Block {i+1} hallucination detected: {result_len} chars (input: {src_len})")
+                            max_len = src_len * 3
+                            block_content = block_content[:max_len]
+                            last_period = block_content.rfind('。')
+                            if last_period == -1:
+                                last_period = block_content.rfind('.')
+                            if last_period > max_len // 2:
+                                block_content = block_content[:last_period + 1]
+                            print(f"      ✂️ Truncated to {len(block_content)} chars")
 
-                        if src_lang != target_lang:
-                            content_len = len(block_content)
-                            if content_len > 5:
-                                # Standard Check: Is it mostly Source Script?
-                                bad_count = 0
-                                if "tha" in src_lang: bad_count = sum(1 for c in block_content if '\u0e00' <= c <= '\u0e7f')
-                                elif "kor" in src_lang: bad_count = sum(1 for c in block_content if '\uac00' <= c <= '\ud7af')
-                                elif "jpn" in src_lang: bad_count = sum(1 for c in block_content if '\u3040' <= c <= '\u30ff')
-                                
-                                # Threshold: 20% (Lowered from 50% to be stricter)
-                                if bad_count / content_len > 0.2:
-                                    print(f"   ⚠️ Block {i+1} validation failed: Output is still {src_lang} ({bad_count}/{content_len} chars)")
-                                    failed_validation_indices.append(i)
-                                    missing_blocks.append(i) 
-
+                        # NO VALIDATION - just accept the result
+                        results[i] = block_content
+                        
                     else:
                         missing_blocks.append(i)
                 
-                # ✅ Retry logic: if >30% blocks missing OR validation failed
-                # If specifically failed validation, we definitely want to retry
+                # Retry only if many blocks are missing (parsing issue)
                 missing_rate = len(missing_blocks) / len(texts) if texts else 0
                 
-                if (missing_blocks or failed_validation_indices) and attempt < max_retries:
-                    if failed_validation_indices:
-                         print(f"   🔄 Retry {attempt + 1}/{max_retries}: Found {len(failed_validation_indices)} blocks not translated (Language Mismatch)")
-                         # Optional: Append "Please actually translate this time" to prompt for retry?
-                         # For now, simple retry implies re-sampling
-                    elif missing_rate > 0.3:
-                        print(f"   🔄 Retry {attempt + 1}/{max_retries}: {len(missing_blocks)} blocks missing")
-                    
+                if missing_rate > 0.5 and attempt < max_retries:
+                    print(f"   🔄 Retry {attempt + 1}/{max_retries}: {len(missing_blocks)} blocks missing")
                     continue  # Retry with same prompt
                 
-                # Fill missing blocks with original text ONLY if result is truly empty
+                # Fill missing blocks with original text
                 for i in missing_blocks:
                     if not results[i]:
-                        print(f"   ⚠️ Block {i+1} not found (empty), using original text")
+                        print(f"   ⚠️ Block {i+1} not found, using original text")
                         results[i] = texts[i]
-                    else:
-                        print(f"   ⚠️ Block {i+1} failed validation (kept imperfect result) instead of reverting")
                 
                 # Log summary
                 if missing_blocks:
-                    print(f"   ⚠️ Typhoon: {len(missing_blocks)}/{len(texts)} blocks had issues (missing or failed validation)")
+                    print(f"   ⚠️ Typhoon: {len(missing_blocks)}/{len(texts)} blocks used original text")
                 
-                return results
-
+                # Return results AND list of failed indices for fallback logic
+                # We return ALL missing_blocks (including those kept as imperfect) so Orchestrator can fallback if desired
+                return results, missing_blocks
+            
             elif resp.status_code in [500, 503]:
                 # ✅ Handle Model Loading Error specifically
                 import time
@@ -264,4 +246,4 @@ def translate_batch_typhoon(
                 print(f"   🔄 Retrying...")
                 continue
     
-    return [""] * len(texts)
+    return [""] * len(texts), list(range(len(texts)))

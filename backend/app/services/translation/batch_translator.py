@@ -7,6 +7,9 @@ from typing import List, Dict, Tuple
 
 from app.services.text_processor import normalize_text, should_translate
 from app.services.llm_service import LLMService
+from app.config import settings
+from app.services.translation.qwen_translator import translate_blocks_qwen
+from app.services.translation.model_manager import unload_model, load_model, preload_model
 
 # Batch Size Constants
 MAX_WORDS_PER_BLOCK = 200      # ✅ เพิ่มจาก 70 → 200 เพราะ NLLB รับได้ 1024 tokens แล้ว
@@ -95,6 +98,7 @@ class BatchTranslator:
         self, 
         blocks: List[Dict], 
         target_lang: str,
+        source_lang: str = "eng_Latn",  # Add source_lang parameter
         job_status: dict = None,
         job_id: str = None
     ) -> Tuple[List[Dict], Dict]:
@@ -106,6 +110,7 @@ class BatchTranslator:
         """
         translated_blocks = []
         stats = {"total": 0, "translated": 0, "skipped": 0, "skipped_langs": {}}
+        original_model = self.llm.model # Capture original model for restoration
         
         if not blocks:
             return translated_blocks, stats
@@ -114,15 +119,17 @@ class BatchTranslator:
         # Each item in all_tasks corresponds to a chunk of text
         all_tasks = [] 
         to_translate_indices = [] # Indices in all_tasks that need translation
+        lang_stats = {}  # Track detected languages {lang: count}
         
+        # Collect all text chunks that need translation
         for idx, block in enumerate(blocks):
-            text = normalize_text(block["text"])
+            text = block.get('text', '')
+            if not text:
+                continue
             
-            # แบ่งข้อความถ้าจำเป็น
-            chunks = []
-            word_count = count_words(text)
-            if word_count > MAX_WORDS_PER_BLOCK:
-                print(f"   ⚠️ Block {idx+1} มีคำเกิน ({word_count} คำ) - กำลังแบ่ง...")
+            # Split long blocks to avoid context overflow
+            if (isinstance(text, str) and len(text) > MAX_WORDS_PER_BLOCK * 10 
+                and '<table>' not in text.lower()):  # Don't split tables
                 chunks = split_long_block(text, max_words=MAX_WORDS_PER_BLOCK)
                 print(f"      → แบ่งเป็น {len(chunks)} chunks")
             else:
@@ -131,7 +138,32 @@ class BatchTranslator:
             for chunk in chunks:
                 if not chunk: continue
                 
+                #  Check if chunk contains HTML table
+                has_html_table = '<table>' in chunk.lower() and '</table>' in chunk.lower()
+                
+                # Per-block hybrid detection
                 need, detected_lang = should_translate(chunk, target_lang)
+                
+                # If in auto mode and detected as unknown/eng_Latn (ambiguous), use LLM for accuracy
+                if source_lang == "auto" and detected_lang in ["unknown", "eng_Latn"]:
+                    # Check if rule-based was certain (has CJK/Thai characters)
+                    has_cjk_thai = any('\u0e00' <= c <= '\u0e7f' or  # Thai
+                                       '\u3040' <= c <= '\u30ff' or  # Japanese
+                                       '\u4e00' <= c <= '\u9fff' or  # Chinese
+                                       '\uac00' <= c <= '\ud7af'     # Korean
+                                       for c in chunk)
+                    
+                    if not has_cjk_thai and len(chunk.strip()) > 20:
+                        # Likely other language (Russian, Arabic, etc) - use LLM
+                        detected_lang = self.llm.detect_language(chunk)
+                        # Re-check need based on new detected_lang
+                        if detected_lang == target_lang:
+                            need = False
+                        else:
+                            need = True
+                
+                # Track language stats
+                lang_stats[detected_lang] = lang_stats.get(detected_lang, 0) + 1
                 
                 task = {
                     'text': chunk,             # Content to translate (or keep)
@@ -139,7 +171,8 @@ class BatchTranslator:
                     'is_skipped': not need,
                     'detected_lang': detected_lang,
                     'original_idx': idx,       # Link back to original block
-                    'result_text': chunk if not need else None # Pre-fill if skipped
+                    'result_text': chunk if not need else None,  # Pre-fill if skipped
+                    'has_html_table': has_html_table  # Flag for special handling
                 }
                 
                 all_tasks.append(task)
@@ -152,17 +185,59 @@ class BatchTranslator:
 
         stats["total"] = len(blocks)
         
-        # 2. Batch Translation
+        # Log detected languages summary
+        if lang_stats and source_lang == "auto":
+            lang_summary = ", ".join([f"{lang} ({count})" for lang, count in sorted(lang_stats.items(), key=lambda x: -x[1])])
+            print(f"   📊 Detected Languages: {lang_summary}")
+        
+        # 2. Handle HTML Tables separately (from images)
+        html_table_indices = []
+        regular_translate_indices = []
+        
+        for idx in to_translate_indices:
+            if all_tasks[idx].get('has_html_table', False):
+                html_table_indices.append(idx)
+            else:
+                regular_translate_indices.append(idx)
+        
+        # Translate HTML tables using TableTranslator
+        if html_table_indices:
+            from .table_translator import TableTranslator
+            table_translator = TableTranslator(self.llm)
+            
+            print(f"   📊 HTML Tables: {len(html_table_indices)} blocks detected")
+            
+            # Use global source_lang instead of per-block detection
+            for idx in html_table_indices:
+                task = all_tasks[idx]
+                translated_html = table_translator.translate_html_table_block(
+                    task['text'],
+                    target_lang,
+                    source_lang  # Use global source_lang
+                )
+                task['result_text'] = translated_html
+                stats["translated"] += 1
+        
+        # Update regular translation list
+        to_translate_indices = regular_translate_indices
+        
+        # 3. Batch Translation (Regular blocks)
         if to_translate_indices:
             # Extract texts to translate
             to_translate_texts = [all_tasks[i]['text'] for i in to_translate_indices]
             
-            # Find source lang from first item (heuristic)
-            first_task = all_tasks[to_translate_indices[0]]
-            src_lang = first_task['detected_lang'] if first_task['detected_lang'] != "unknown" else "tha_Thai"
+            # Use most common detected language as src_lang for batch
+            detected_langs = [all_tasks[i]['detected_lang'] for i in to_translate_indices]
+            from collections import Counter
+            lang_counter = Counter(detected_langs)
+            src_lang = lang_counter.most_common(1)[0][0] if lang_counter else "eng_Latn"
+            if src_lang == "unknown":
+                src_lang = "eng_Latn"
             
             num_batches = (len(to_translate_texts) + self.batch_size - 1) // self.batch_size
             print(f"   📊 ต้องแปล: {len(to_translate_texts)} chunks, ข้าม: {stats['skipped']}, batches: {num_batches}")
+            if source_lang == "auto":
+                print(f"      🔤 Using {src_lang} for batch translation")
             
             current_translate_idx = 0
             
@@ -178,14 +253,69 @@ class BatchTranslator:
                 
                 print(f"   🔄 Batch {batch_idx + 1}/{num_batches} ({len(batch_texts)} chunks)")
                 
-                # Execute Translation
-                batch_results = self.llm.translate_batch_typhoon(batch_texts, target_lang, src_lang, job_status, job_id)
+                # Execute Translation (Typhoon) - First Attempt
+                # Returns (results, failed_validation_indices)
+                batch_results, batch_failed_indices = self.llm.translate_batch_typhoon(
+                    batch_texts, target_lang, src_lang, job_status, job_id
+                )
                 
                 # Verify results length
                 if len(batch_results) != len(batch_texts):
                     print(f"   ⚠️ Mismatch results: got {len(batch_results)}, expected {len(batch_texts)}")
-                    # Fill missing with empty string
                     batch_results.extend([""] * (len(batch_texts) - len(batch_results)))
+                
+                # --- Step 1: Retry Failed Blocks with Typhoon ---
+                if batch_failed_indices:
+                    failed_texts = [batch_texts[i] for i in batch_failed_indices]
+                    print(f"   🔄 Retry {len(failed_texts)} failed blocks with Typhoon...")
+                    
+                    retry_results, still_failed_indices = self.llm.translate_batch_typhoon(
+                        failed_texts, target_lang, src_lang, job_status, job_id
+                    )
+                    
+                    # Merge retry results
+                    successfully_recovered = []
+                    for idx, fail_idx in enumerate(batch_failed_indices):
+                        if idx not in still_failed_indices and retry_results[idx]:
+                            batch_results[fail_idx] = retry_results[idx]
+                            successfully_recovered.append(fail_idx)
+                    
+                    if successfully_recovered:
+                        print(f"      ✅ Typhoon retry recovered {len(successfully_recovered)} blocks")
+                    
+                    # Recalculate final failed indices (those still failed after retry)
+                    final_failed_indices = [batch_failed_indices[i] for i in still_failed_indices]
+                    
+                    # --- Step 2: Qwen Fallback for Still-Failed Blocks ---
+                    if final_failed_indices:
+                        print(f"   🚨 {len(final_failed_indices)} blocks still failed - Switching to Qwen...")
+                        
+                        # Unload Typhoon
+                        typhoon_model = "scb10x/typhoon-translate1.5-4b:latest"
+                        unload_model(typhoon_model, settings.OLLAMA_URL)
+                        
+                        # Load Qwen
+                        qwen_model = "qwen2.5:3b"
+                        load_model(qwen_model, settings.OLLAMA_URL)
+                        
+                        # Translate with Qwen
+                        qwen_texts = [batch_texts[i] for i in final_failed_indices]
+                        qwen_results, qwen_failed = translate_blocks_qwen(
+                            qwen_texts, target_lang, src_lang, settings.OLLAMA_URL, qwen_model, job_status, job_id
+                        )
+                        
+                        # Merge Qwen results
+                        for idx, fail_idx in enumerate(final_failed_indices):
+                            if qwen_results[idx]:
+                                batch_results[fail_idx] = qwen_results[idx]
+                                print(f"      ✅ Block {fail_idx+1} recovered by Qwen")
+                            else:
+                                print(f"      ❌ Block {fail_idx+1} failed even with Qwen")
+                        
+                        # Cleanup: Unload Qwen, Preload Typhoon
+                        unload_model(qwen_model, settings.OLLAMA_URL)
+                        preload_model(typhoon_model, settings.OLLAMA_URL)
+
                 
                 # Assign results back to tasks
                 for res_text in batch_results:

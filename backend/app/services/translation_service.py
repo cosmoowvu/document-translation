@@ -84,62 +84,16 @@ def process_translation(job_id: str, file_path: str, source_lang: str, target_la
         total_table_cells = 0
         
         # ---------------------------------------------------------
-        # 🤖 Auto-Detect Language Logic
+        # 🤖 Per-Block Language Detection (Hybrid)
         # ---------------------------------------------------------
+        # Note: Language detection moved to per-block level in batch_translator
+        # Each block will detect using rule-based (fast) or LLM (accurate) as needed
+        
         if source_lang == "auto":
-            print("🔍 Auto-detecting language from OCR results...")
-            
-            # 1. Sample text from first 3 pages
-            sample_text = ""
-            pages_to_check = list(doc_result["pages"].keys())[:3]
-            for page_key in pages_to_check:
-                blocks = doc_result["pages"][page_key]["blocks"]
-                for block in blocks[:10]: # Check first 10 blocks per page
-                    sample_text += block.get("text", "") + " "
-
-            # 2. Use LLM for robust detection
-            detected_lang = translation_service.llm.detect_language(sample_text)
-            
-            # Print simplified log for clarity
-            total_chars = len(sample_text.strip())
-            print(f"   🤖 Detected Language (LLM): {detected_lang} (from {total_chars} samples)")
-            
-            # Save to logger for caching
-            logger.log_detected_language(detected_lang)
-            
-            # 3. Update source_lang
-            source_lang = detected_lang
-            
-            # 4. Check if we need to skip translation
-            if source_lang == target_lang:
-                print(f"   ⏭️ Source matches Target ({source_lang}). Skipping translation.")
-                
-                # -- SKIP LOGIC --
-                # Just copy original text to "text" field
-                for page_key in doc_result["pages"]:
-                    page = doc_result["pages"][page_key]
-                    for block in page["blocks"]:
-                        block["original_text"] = block.get("text", "") # Ensure original is set
-                        block["text"] = block.get("text", "") # Result = Original
-                        block["detected_lang"] = source_lang
-                        block["was_translated"] = False
-                    
-                # Calculate stats
-                total_translated = 0
-                total_skipped = total_blocks
-
-                # Proceed to Render Step directly
-                job_status[job_id]["progress"] = 80
-                job_status[job_id]["message"] = f"ภาษาตรงกัน ({source_lang}) - ข้ามการแปล..."
-                
-                # We need to skip the huge loop below.
-                # Let's set a flag
-                skip_translation_phase = True
-            else:
-                 print(f"   ▶️ Proceeding to translate {source_lang} -> {target_lang}")
-                 skip_translation_phase = False
-        else:
-             skip_translation_phase = False
+            print("🔍 Using per-block language detection...")
+            # Will be handled by batch_translator with hybrid approach
+        
+        skip_translation_phase = False
 
         
         # ✅ Check if cancelled after OCR
