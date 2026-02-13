@@ -8,13 +8,14 @@ const API_URL = window.location.origin;
 // Export API functions
 export const TranslationAPI = {
     // Start translation job
-    async startTranslation(jobId, sourceLang, targetLang, translationMode, ocrEngine = 'docling') {
+    async startTranslation(jobId, sourceLang, targetLang, translationMode, ocrEngine = 'docling', renderMode = 'canvas') {
         const payload = {
             job_id: jobId,
             source_lang: sourceLang || 'tha_Thai',
             target_lang: targetLang || 'eng_Latn',
             translation_mode: translationMode || 'typhoon_direct',
-            ocr_engine: ocrEngine  // ✅ Add OCR engine
+            ocr_engine: ocrEngine,  // ✅ Add OCR engine
+            render_mode: renderMode // ✅ Add Render Mode
         };
 
         console.log('Sending translate request:', payload);

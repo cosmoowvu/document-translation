@@ -60,7 +60,18 @@ class RenderService:
             canvas = Image.new('RGB', (page_width, page_height), 'white')
             return [canvas]
         
-        text = blocks[0].get("text", "")
+        text = ""
+        # Reset blocks sort to ensure flow order (should already be sorted by OpenCV but safety check)
+        # blocks.sort(key=lambda b: (int(b['bbox']['y1']/10), b['bbox']['x1'])) 
+        
+        # Concatenate all text blocks with double newline to preserve paragraph separation
+        full_text_parts = []
+        for b in blocks:
+            b_text = b.get("text", "").strip()
+            if b_text:
+                full_text_parts.append(b_text)
+        
+        text = "\n\n".join(full_text_parts)
         
         # Cleanup and normalize (delegated to text_processor)
         text = cleanup_llm_explanations(text)
@@ -249,8 +260,57 @@ class RenderService:
         
         print(f"   🎨 Rendering page {page_no}: {width}x{height}px (scale={scale:.2f}, DPI={self.dpi})")
         
-        canvas = Image.new('RGB', (width, height), 'white')
+        # [NEW] Check for background image (Overlay Mode)
+        image_path = page_data.get("image_path")
+        if image_path and os.path.exists(image_path):
+            print(f"      🖼️ Loading background image: {os.path.basename(image_path)}")
+            try:
+                canvas = Image.open(image_path).convert("RGB")
+                # Resize if needed (unlikely if DPI matches, but good safety)
+                if canvas.size != (width, height):
+                    canvas = canvas.resize((width, height), Image.Resampling.LANCZOS)
+            except Exception as e:
+                print(f"      ⚠️ Failed to load background image: {e}")
+                canvas = Image.new('RGB', (width, height), 'white')
+        else:
+            canvas = Image.new('RGB', (width, height), 'white')
+
         draw = ImageDraw.Draw(canvas)
+        
+        # [NEW] Pre-pass: "Inpaint" (White-out) original text areas
+        # เฉพาะถ้ามี background image ถึงจะลบ
+        if image_path and os.path.exists(image_path):
+             for block in page_data.get("blocks", []):
+                # [SAFETY] If block has no text (e.g. graphic that failed OCR), DO NOT ERASE IT.
+                if not block.get("text", "").strip():
+                    continue
+
+                bbox = block["bbox"]
+                # Add padding to ensure full text erasure (5px scaled)
+                padding = int(5 * scale)
+                x1 = max(0, int(bbox["x1"] * scale) - padding)
+                y1 = max(0, int(bbox["y1"] * scale) - padding)
+                x2 = min(width, int(bbox["x2"] * scale) + padding)
+                y2 = min(height, int(bbox["y2"] * scale) + padding)
+                
+                # Draw filled rectangle to "erase" original text
+                # [SMART INPAINT] Use median color of the area to fill
+                try:
+                    # Crop the area from original canvas
+                    crop = canvas.crop((x1, y1, x2, y2))
+                    from PIL import ImageStat
+                    stat = ImageStat.Stat(crop)
+                    # Use median color (usually background)
+                    median_bg = tuple(map(int, stat.median))
+                    
+                    if padding > 0: # Log only if we are doing something
+                         print(f"      🎨 Inpainting Block: bbox={bbox} -> rect=({x1},{y1},{x2},{y2}) | Color={median_bg}")
+
+                    # Fill with median color
+                    draw.rectangle([x1, y1, x2, y2], fill=median_bg)
+                except Exception as e:
+                    print(f"      ⚠️ Inpaint failed for block, using white: {e}")
+                    draw.rectangle([x1, y1, x2, y2], fill="white")
         
         # Font Multiplier (Smart Scaling)
         reference_width = self.dpi * 8.27
@@ -512,8 +572,28 @@ class RenderService:
                 continue
             
             # Check if OCR flow mode (delegated to text_processor)
-            if is_ocr_flow_mode(page_data):
-                print(f"   📄 Page {page_no}: Using flow rendering mode")
+            # Markdown mode implies structured output, BUT user might want overlay.
+            # If "render_mode" is "markdown", we might still want overlay if user asks.
+            # For now, let's stick to flow only if specifically standard flow. 
+            # RESET behavior: "markdown" mode in request = just OCR method. 
+            # Rendering is separate. If we have image_path, we can do overlay.
+            
+            # If doc_result has "render_mode" as "flow", use flow.
+            # If "markdown" was just for OCR engine selection, we fallback to overlay.
+            render_mode_param = doc_result.get("render_mode", "auto")
+            is_flow_requested = render_mode_param == "flow"
+            
+            # [FIX] If we have a background image, we MUST use render_page (Overlay)
+            # to preserve the background. Flow mode discards the background.
+            has_bg_image = "image_path" in page_data and os.path.exists(page_data["image_path"])
+            
+            if has_bg_image:
+                 print(f"   🖼️ Background image found, forcing Overlay Mode (Smart Inpaint)")
+                 is_flow_requested = False
+                 # is_ocr_flow_mode ignored because we want background
+            
+            if is_flow_requested or (is_ocr_flow_mode(page_data) and not has_bg_image):
+                print(f"   📄 Page {page_no}: Using flow rendering mode (Flow Requested={is_flow_requested})")
                 page_images = self.render_page_flow(page_data, page_no)
                 
                 for flow_idx, canvas in enumerate(page_images):
@@ -547,10 +627,33 @@ class RenderService:
         # Generate export formats
         try:
             export_service.export_to_docx(doc_result, str(output_dir / "translated.docx"))
+            
+            # Export to Markdown
+            self._export_to_markdown(doc_result, str(output_dir / "translated.md"))
+            
         except Exception as e:
             print(f"⚠️ Export error (non-critical): {e}")
         
         return str(pdf_path)
+
+    def _export_to_markdown(self, doc_result: Dict[str, Any], output_path: str):
+        """Generate Markdown file from document blocks"""
+        with open(output_path, "w", encoding="utf-8") as f:
+            for page_no in range(1, doc_result["num_pages"] + 1):
+                page_data = doc_result["pages"].get(page_no) or doc_result["pages"].get(str(page_no))
+                if not page_data: continue
+                
+                f.write(f"## Page {page_no}\n\n")
+                
+                # Blocks are already sorted by Y then X in OpenCVService
+                blocks = page_data.get("blocks", [])
+                for block in blocks:
+                    text = block.get("text", "").strip()
+                    if text:
+                        f.write(f"{text}\n\n")
+                
+                f.write("---\n\n")
+        print(f"   📝 Saved Markdown to {output_path}")
 
 
 # Singleton instance

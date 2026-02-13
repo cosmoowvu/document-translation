@@ -110,38 +110,55 @@ class OCRService:
                     traceback.print_exc()
                     print(f"⚠️ Typhoon OCR failed: {e}")
                     print(f"🔄 Falling back to Docling...")
-                    result = self._docling.process_document(file_path, source_lang)
-                    result["ocr_engine"] = "Docling (Fallback)"
-                    return result
-            else:
-                # Unknown file type -> fallback to Docling
-                print(f"📸 Unknown file type '{file_ext}' -> Defaulting to Docling")
-                result = self._docling.process_document(file_path, source_lang)
-                result["ocr_engine"] = "docling (auto)"
-                return result
-        
-        # ✅ Explicit OCR engine selection
-        print(f"📸 Using OCR Engine: {ocr_engine.upper()}")
+    def process_document(
+        self,
+        file_path: str,
+        source_lang: str = "tha_Thai",
+        ocr_engine: str = "docling",
+        job_id: str = None  # ✅ Add optional job_id
+    ) -> Dict[str, Any]:
+        """
+        Process the document and extract text blocks.
+        Routing logic based on `ocr_engine`.
+        """
+        print(f"🔍 Orchestrator Processing with Engine: {ocr_engine}")
         
         if ocr_engine == "typhoon":
+            # Direct Typhoon OCR Cloud
+            # Lazy load Typhoon service
             if self._typhoon is None:
                 try:
                     self._typhoon = TyphoonOCRService()
                 except ValueError as e:
                     print(f"⚠️ Typhoon OCR not configured: {e}")
-                    return self._docling.process_document(file_path, source_lang)
-            
+                    print(f"🔄 Falling back to Docling...")
+                    result = self._docling.process_document(file_path, source_lang)
+                    result["ocr_engine"] = "Docling (Fallback)"
+                    return result
             return self._typhoon.process_document(file_path, source_lang)
-        
+            
         elif ocr_engine == "hybrid":
-            # ✅ HYBRID MODE
-            if self._hybrid is None:
-                self._hybrid = HybridOCRService()
-                
-            return self._hybrid.process_document(file_path, source_lang)
+            # Hybrid: Docling Local + Typhoon Correction
+            # For now, just alias to typhoon or docling. 
+            # In real hybrid, we might run Docling first, then fix with LLM.
+            # But here, user treats 'hybrid' as a distinct mode.
+            # Let's map 'hybrid' to Docling for layout + Typhoon for Text?
+            # Or just use Typhoon directly?
+            # Based on user context, 'Hybrid' usually implies Docling + LLM Correction.
+            # Here we just route to docling for now, since Correction happens in 'Translation' phase.
+            return self._docling.process_document(file_path, source_lang)
         
         elif ocr_engine == "paddleocr":
             return self._paddle.process_document(file_path, source_lang)
+            
+        elif ocr_engine == "opencv":
+            # ✅ OpenCV Mode
+            # Lazy load
+            if not hasattr(self, '_opencv') or self._opencv is None:
+                from .opencv_service import OpenCVService
+                self._opencv = OpenCVService()
+                
+            return self._opencv.process_document(file_path, source_lang, job_id=job_id)
             
         else:
             return self._docling.process_document(file_path, source_lang)

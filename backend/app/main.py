@@ -57,6 +57,8 @@ async def preload_models():
         print(f"⚠️ Model preload failed (non-critical):")
         print(f"   Error type: {type(e).__name__}")
         print(f"   Error message: {str(e)}")
+        print(f"   👉 Tip: Ensure Ollama is running using 'ollama serve'")
+        print(f"   👉 Tip: Check if OLLAMA_URL={settings.OLLAMA_URL} is correct")
 
 
 @asynccontextmanager

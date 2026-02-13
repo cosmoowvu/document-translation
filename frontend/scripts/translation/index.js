@@ -55,9 +55,11 @@ export async function startTranslation() {
         const targetLang = document.getElementById('targetLang');
         const modelElement = document.getElementById('translationModel');
         const ocrEngineElement = document.getElementById('ocrEngine');
+        const renderModeElement = document.getElementById('renderMode');
 
-        // ✅ Get selected OCR engine from dropdown
+        // ✅ Get selected options
         const ocrEngine = ocrEngineElement ? ocrEngineElement.value : 'docling';
+        const renderMode = renderModeElement ? renderModeElement.value : 'canvas';
 
         TranslationUI.showProgress('กำลังตรวจสอบไฟล์...', 5);
 
@@ -66,7 +68,8 @@ export async function startTranslation() {
             sourceLang.value,
             targetLang.value,
             modelElement ? modelElement.value : 'qwen_direct',
-            ocrEngine  // ✅ Pass OCR engine
+            ocrEngine,  // ✅ Pass OCR engine
+            renderMode  // ✅ Pass Render Mode
         );
 
         // Save state

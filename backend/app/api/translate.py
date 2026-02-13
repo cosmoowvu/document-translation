@@ -21,6 +21,7 @@ class TranslateRequest(BaseModel):
     target_lang: str = "eng_Latn"
     translation_mode: str = "qwen_direct"  # qwen_direct, gemma_direct, google_qwen, google_gemma
     ocr_engine: str = "docling"  # ✅ Add OCR engine selection
+    render_mode: str = "canvas"  # ✅ Add render mode (canvas, markdown)
 
 
 class TranslateResponse(BaseModel):
@@ -66,7 +67,17 @@ async def translate_document(
     file_hash = compute_file_hash(file_path)
     translation_mode = request.translation_mode or "qwen_direct"
     ocr_engine = request.ocr_engine or "docling"
+    render_mode = request.render_mode or "canvas"
+    
+    # ✅ FAIL-SAFE: If Markdown mode is requested but OCR engine is NOT Typhoon, force Canvas
+    if render_mode == "markdown" and ocr_engine != "typhoon":
+        print(f"⚠️ Security Warning: Markdown mode requested with {ocr_engine}. Forcing Canvas mode.")
+        render_mode = "canvas"
+        
     cache_key = get_cache_key(file_hash, request.source_lang, request.target_lang, translation_mode, ocr_engine)
+    # Note: We should technically include render_mode in cache key if it affects the output structure
+    # But for now, let's append it to ensure uniqueness
+    cache_key += f"_{render_mode}"
     
     # ตรวจ cache
     cached_job_id = check_cache(cache_key)
@@ -139,7 +150,8 @@ async def translate_document(
         job_status=job_status,
         translation_mode=request.translation_mode,
         cache_key=cache_key,  # ส่ง cache_key ไปด้วย
-        ocr_engine=request.ocr_engine  # ✅ Pass OCR engine
+        ocr_engine=request.ocr_engine,  # ✅ Pass OCR engine
+        render_mode=render_mode  # ✅ Pass Render Mode
     )
     
     return TranslateResponse(

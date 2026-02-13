@@ -86,8 +86,14 @@
                     ⇄
                 </button>
 
-                <!-- Empty div to balance grid (1fr) -->
-                <div></div>
+                <!-- Render Mode Selection -->
+                <div class="form-group">
+                    <label>Render Mode</label>
+                    <select id="renderMode" onchange="validateRenderMode()">
+                        <option value="canvas" selected>Canvas</option>
+                        <option value="markdown">Markdown</option>
+                    </select>
+                </div>
 
                 <!-- Hidden Translation Mode (Defaults to typhoon_direct) -->
                 <input type="hidden" id="translationModel" value="typhoon_direct">
@@ -389,6 +395,32 @@
 
     <!-- Application Initialization -->
     <script type="module" src="scripts/init.js"></script>
+
+    <script>
+        // validate render mode logic
+        function validateRenderMode() {
+            const ocrEngine = document.getElementById('ocrEngine').value;
+            const renderMode = document.getElementById('renderMode');
+
+            // Check if Markdown is selected but OCR is NOT Typhoon
+            // We consider 'typhoon' and 'hybrid' (since it uses Typhoon) as valid for now, 
+            // but user specifically said "Typhoon OCR (Cloud)".
+            // Let's stick to strict 'typhoon' check based on user request "เฉพาะการเลือก OCR Engine คือ Typhoon OCR (Cloud)"
+
+            if (renderMode.value === 'markdown' && ocrEngine !== 'typhoon') {
+                alert('โหมด Markdown รองรับเฉพาะ OCR Engine: Typhoon OCR (Cloud) เท่านั้น\nระบบจะเปลี่ยนกลับเป็น Canvas');
+                renderMode.value = 'canvas';
+            }
+        }
+
+        // Add event listener to OCR Engine as well
+        document.addEventListener('DOMContentLoaded', () => {
+            const ocrSelect = document.getElementById('ocrEngine');
+            if (ocrSelect) {
+                ocrSelect.addEventListener('change', validateRenderMode);
+            }
+        });
+    </script>
 </body>
 
 </html>
