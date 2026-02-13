@@ -24,7 +24,7 @@ class OpenCVService:
         self.debug_dir = debug_dir
         os.makedirs(self.debug_dir, exist_ok=True)
 
-    def process_document(self, file_path: str, source_lang: str = "tha_Thai", job_id: str = None) -> Dict[str, Any]:
+    def process_document(self, file_path: str, source_lang: str = "tha_Thai", job_id: str = None, job_status: Dict = None) -> Dict[str, Any]:
         """
         Process document to detect text blocks.
         """
@@ -47,6 +47,11 @@ class OpenCVService:
             num_pages = len(doc)
             
             for i in range(num_pages):
+                # Check cancellation
+                if job_status and job_id and job_status.get(job_id, {}).get("cancelled", False):
+                    print(f"      ⛔ Job {job_id} cancelled during OpenCV processing")
+                    raise Exception("Job cancelled")
+
                 page = doc[i]
                 # 1. Base Image Preparation (180 DPI)
                 pix = page.get_pixmap(dpi=self.target_dpi)
@@ -59,7 +64,7 @@ class OpenCVService:
                     img = cv2.cvtColor(img_data, cv2.COLOR_RGB2BGR) # OpenCV uses BGR
                 
                 # Process page
-                blocks = self._process_page_image(img, page_num=i+1, debug_out_dir=debug_path)
+                blocks = self._process_page_image(img, page_num=i+1, debug_out_dir=debug_path, job_id=job_id, job_status=job_status)
                 
                 # Calculate size in points (for PDF consistency)
                 width_pts = page.rect.width
@@ -97,7 +102,7 @@ class OpenCVService:
             height, width = img.shape[:2]
             
             # Process page
-            blocks = self._process_page_image(img, page_num=1, debug_out_dir=debug_path)
+            blocks = self._process_page_image(img, page_num=1, debug_out_dir=debug_path, job_id=job_id, job_status=job_status)
             
             # For images, we need to match fitz's handling in translation_service
             # fitz.open(img_path) will create a page with dimensions based on DPI (usually 72 if not set, or image DPI)
@@ -133,8 +138,12 @@ class OpenCVService:
             "ocr_engine": "opencv"
         }
 
-    def _process_page_image(self, img: np.ndarray, page_num: int, debug_out_dir: Path) -> List[Dict]:
+    def _process_page_image(self, img: np.ndarray, page_num: int, debug_out_dir: Path, job_id: str = None, job_status: Dict = None) -> List[Dict]:
         """core layout analysis pipeline"""
+        
+        # Check cancellation
+        if job_status and job_id and job_status.get(job_id, {}).get("cancelled", False):
+             return []
         
         # --- 2. Preprocessing ---
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
@@ -195,6 +204,9 @@ class OpenCVService:
                 cv2.rectangle(debug_lines_img, (b['x'], b['y']), (b['x2'], b['y2']), (0, 255, 0), 2)
             cv2.imwrite(str(debug_out_dir / f"page_{page_num}_6_lines_detected.png"), debug_lines_img)
         
+        if job_status and job_id and job_status.get(job_id, {}).get("cancelled", False):
+            return []
+
         # --- 3. Segmentation Pass B: Paragraph Merging ---
         # Sort by Y then X (Top to Bottom, Left to Right)
         # Round Y to nearest 10px to group items in same "row" for sorting

@@ -80,18 +80,9 @@ export const TranslationUI = {
         const stepExtract = document.getElementById('stepExtract');
         const stepTranslate = document.getElementById('stepTranslate');
         const stepRender = document.getElementById('stepRender');
-        const stepRefine = document.getElementById('stepRefine');
 
-        // Always hide refine step
-        if (stepRefine) stepRefine.style.display = 'none';
 
-        // Dynamic label for extraction
-        const fileName = document.getElementById('fileNameDisplay').textContent.trim();
-        if (fileName.toLowerCase().endsWith('.pdf')) {
-            stepExtract.textContent = 'ดึงข้อความ';
-        } else {
-            stepExtract.textContent = 'OCR';
-        }
+
 
         // Reset all steps
         const allSteps = [stepAnalyze, stepExtract, stepTranslate, stepRender];
@@ -101,12 +92,12 @@ export const TranslationUI = {
         });
 
         // Update step classes based on progress (Standard Flow)
-        if (percent < 10) {
+        if (percent < 30) {
             stepAnalyze.classList.add('active');
             stepExtract.classList.add('pending');
             stepTranslate.classList.add('pending');
             stepRender.classList.add('pending');
-        } else if (percent < 30) {
+        } else if (percent < 50) {
             stepAnalyze.classList.add('done');
             stepExtract.classList.add('active');
             stepTranslate.classList.add('pending');
@@ -267,21 +258,7 @@ export const TranslationUI = {
     // Load result stats (Badges only)
     async loadResultStats(jobId) {
         // Get model info
-        const modelElement = document.getElementById('translationModel');
-        // Handle both select (old) and invalid/missing/hidden input cases safely
-        let modelName = 'Typhoon (Direct)'; // Default for hidden input
-
-        if (modelElement) {
-            if (modelElement.tagName === 'SELECT') {
-                modelName = modelElement.options[modelElement.selectedIndex].text;
-            } else if (modelElement.value) {
-                // Map value to readable name if needed, or just use fixed name for now since we removed the select
-                const nameMap = {
-                    'typhoon_direct': 'Typhoon (Direct)'
-                };
-                modelName = nameMap[modelElement.value] || 'Typhoon (Direct)';
-            }
-        }
+        let modelName = 'Typhoon (Direct)';
 
         let timeBadge = '';
         let langBadge = '';

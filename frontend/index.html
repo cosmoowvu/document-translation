@@ -68,36 +68,7 @@
                 </div>
             </div>
 
-            <!-- Row 2: OCR Engine Only (Translation Mode hidden) -->
-            <div class="language-row" style="margin-bottom: 24px;">
-                <div class="form-group">
-                    <label>OCR Engine</label>
-                    <select id="ocrEngine">
-                        <option value="default" selected>Default</option>
-                        <option value="docling">Docling (EasyOCR)</option>
-                        <option value="paddleocr">PaddleOCR</option>
-                        <option value="typhoon">Typhoon OCR (Cloud)</option>
-                        <option value="hybrid">Hybrid (Docling + Typhoon)</option>
-                    </select>
-                </div>
 
-                <!-- Spacer to match Swap Button width -->
-                <button type="button" class="swap-btn" style="visibility: hidden; pointer-events: none;">
-                    ⇄
-                </button>
-
-                <!-- Render Mode Selection -->
-                <div class="form-group">
-                    <label>Render Mode</label>
-                    <select id="renderMode" onchange="validateRenderMode()">
-                        <option value="canvas" selected>Canvas</option>
-                        <option value="markdown">Markdown</option>
-                    </select>
-                </div>
-
-                <!-- Hidden Translation Mode (Defaults to typhoon_direct) -->
-                <input type="hidden" id="translationModel" value="typhoon_direct">
-            </div>
 
             <!-- Upload Area -->
             <div class="upload-area" id="uploadArea">
@@ -174,9 +145,9 @@
             <!-- Step indicators -->
             <div style="margin-bottom: 15px; text-align: center;">
                 <span class="progress-step pending" id="stepAnalyze">ตรวจสอบ</span>
-                <span class="progress-step pending" id="stepExtract">ดึงข้อความ</span>
-                <span class="progress-step pending" id="stepTranslate">แปล</span>
-                <span class="progress-step pending" id="stepRefine" style="display: none;">เกลาคำ</span>
+                <span class="progress-step pending" id="stepExtract">OCR</span>
+                <span class="progress-step pending" id="stepTranslate">แปลภาษา</span>
+
                 <span class="progress-step pending" id="stepRender">สร้างไฟล์</span>
             </div>
 
@@ -396,31 +367,7 @@
     <!-- Application Initialization -->
     <script type="module" src="scripts/init.js"></script>
 
-    <script>
-        // validate render mode logic
-        function validateRenderMode() {
-            const ocrEngine = document.getElementById('ocrEngine').value;
-            const renderMode = document.getElementById('renderMode');
 
-            // Check if Markdown is selected but OCR is NOT Typhoon
-            // We consider 'typhoon' and 'hybrid' (since it uses Typhoon) as valid for now, 
-            // but user specifically said "Typhoon OCR (Cloud)".
-            // Let's stick to strict 'typhoon' check based on user request "เฉพาะการเลือก OCR Engine คือ Typhoon OCR (Cloud)"
-
-            if (renderMode.value === 'markdown' && ocrEngine !== 'typhoon') {
-                alert('โหมด Markdown รองรับเฉพาะ OCR Engine: Typhoon OCR (Cloud) เท่านั้น\nระบบจะเปลี่ยนกลับเป็น Canvas');
-                renderMode.value = 'canvas';
-            }
-        }
-
-        // Add event listener to OCR Engine as well
-        document.addEventListener('DOMContentLoaded', () => {
-            const ocrSelect = document.getElementById('ocrEngine');
-            if (ocrSelect) {
-                ocrSelect.addEventListener('change', validateRenderMode);
-            }
-        });
-    </script>
 </body>
 
 </html>

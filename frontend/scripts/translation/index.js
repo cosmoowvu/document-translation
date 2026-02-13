@@ -53,13 +53,7 @@ export async function startTranslation() {
     try {
         const sourceLang = document.getElementById('sourceLang');
         const targetLang = document.getElementById('targetLang');
-        const modelElement = document.getElementById('translationModel');
-        const ocrEngineElement = document.getElementById('ocrEngine');
-        const renderModeElement = document.getElementById('renderMode');
 
-        // ✅ Get selected options
-        const ocrEngine = ocrEngineElement ? ocrEngineElement.value : 'docling';
-        const renderMode = renderModeElement ? renderModeElement.value : 'canvas';
 
         TranslationUI.showProgress('กำลังตรวจสอบไฟล์...', 5);
 
@@ -67,9 +61,7 @@ export async function startTranslation() {
             currentJobId,
             sourceLang.value,
             targetLang.value,
-            modelElement ? modelElement.value : 'qwen_direct',
-            ocrEngine,  // ✅ Pass OCR engine
-            renderMode  // ✅ Pass Render Mode
+            'typhoon_direct'
         );
 
         // Save state

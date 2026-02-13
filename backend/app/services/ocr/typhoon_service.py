@@ -21,8 +21,10 @@ class TyphoonOCRService:
         os.environ["TYPHOON_OCR_API_KEY"] = self.api_key
     
     
-    def process_document(self, file_path: str, source_lang: str = "tha_Thai") -> Dict[str, Any]:
-        """Process document using Typhoon OCR Cloud API"""
+    def process_document(self, file_path: str, source_lang: str = "tha_Thai", job_id: str = None, job_status: Dict = None) -> Dict[str, Any]:
+        """
+        Process document using Typhoon OCR Cloud API
+        """
         from typhoon_ocr import ocr_document
         from PIL import Image as PILImage
         import fitz  # PyMuPDF
@@ -43,6 +45,11 @@ class TyphoonOCRService:
                 num_pages = len(pdf_doc)
                 
                 for i in range(num_pages):
+                    # Check cancellation
+                    if job_status and job_id and job_status.get(job_id, {}).get("cancelled", False):
+                        print(f"      ⛔ Job {job_id} cancelled during PDF conversion")
+                        raise Exception("Job cancelled")
+                        
                     page = pdf_doc[i]
                     # Render page to image (300 DPI for good OCR)
                     pix = page.get_pixmap(dpi=300)
@@ -93,6 +100,11 @@ class TyphoonOCRService:
         
         try:
             for item in pages_to_process:
+                # Check cancellation
+                if job_status and job_id and job_status.get(job_id, {}).get("cancelled", False):
+                    print(f"      ⛔ Job {job_id} cancelled during Typhoon OCR loop")
+                    raise Exception("Job cancelled")
+
                 page_no = item["page_num"]
                 current_path = item["path"]
                 
