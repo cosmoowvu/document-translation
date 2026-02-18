@@ -19,8 +19,98 @@ class TyphoonOCRService:
         
         # Set API key for typhoon-ocr package
         os.environ["TYPHOON_OCR_API_KEY"] = self.api_key
-    
-    
+
+
+    def process_image_direct(self, image_path: str, source_lang: str = "tha_Thai", is_table: bool = False) -> str:
+        """
+        Direct VLM API call to Typhoon with strict OCR prompt.
+        Prevents hallucination by instructing the model to read exactly what it sees.
+        Returns extracted text string.
+        """
+        import requests
+        import base64
+
+        # Read and encode image
+        with open(image_path, "rb") as f:
+            image_data = base64.b64encode(f.read()).decode("utf-8")
+
+        # Determine image mime type
+        ext = os.path.splitext(image_path)[1].lower()
+        mime_type = "image/png" if ext == ".png" else "image/jpeg"
+
+        # Build prompt based on block type
+        if is_table:
+            user_prompt = (
+                "Read all text in this image exactly as it appears. "
+                "Output the content as a markdown table. "
+                "Do not add, remove, or change any text. "
+                "If you cannot read a cell clearly, use '?' as placeholder."
+            )
+        else:
+            user_prompt = (
+                "Read all text in this image exactly as it appears, character by character. "
+                "Output ONLY the text you see. "
+                "Do NOT autocomplete, guess, or add any text that is not visible. "
+                "Do NOT correct spelling or grammar. "
+                "If the image contains no text, output an empty string."
+            )
+
+        payload = {
+            "model": "typhoon-ocr",
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a strict OCR engine. "
+                        "Your only job is to transcribe text from images exactly as it appears. "
+                        "Never autocomplete, hallucinate, or infer text that is not clearly visible. "
+                        "Output only the transcribed text with no commentary."
+                    )
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:{mime_type};base64,{image_data}"
+                            }
+                        },
+                        {
+                            "type": "text",
+                            "text": user_prompt
+                        }
+                    ]
+                }
+            ],
+            "max_tokens": 2048,
+            "temperature": 0.0,  # Zero temperature = deterministic, no creativity
+        }
+
+        try:
+            resp = requests.post(
+                "https://api.opentyphoon.ai/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json"
+                },
+                json=payload,
+                timeout=120
+            )
+
+            if resp.status_code == 200:
+                result = resp.json()
+                text = result["choices"][0]["message"]["content"].strip()
+                return text
+            else:
+                print(f"   ⚠️ Direct VLM API Error: {resp.status_code} - {resp.text[:200]}")
+                return ""
+
+        except Exception as e:
+            print(f"   ⚠️ Direct VLM API Exception: {e}")
+            return ""
+
+
     def process_document(self, file_path: str, source_lang: str = "tha_Thai", job_id: str = None, job_status: Dict = None) -> Dict[str, Any]:
         """
         Process document using Typhoon OCR Cloud API

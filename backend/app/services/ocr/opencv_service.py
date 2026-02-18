@@ -64,7 +64,7 @@ class OpenCVService:
                     img = cv2.cvtColor(img_data, cv2.COLOR_RGB2BGR) # OpenCV uses BGR
                 
                 # Process page
-                blocks = self._process_page_image(img, page_num=i+1, debug_out_dir=debug_path, job_id=job_id, job_status=job_status)
+                blocks = self._process_page_image(img, page_num=i+1, debug_out_dir=debug_path, job_id=job_id, job_status=job_status, source_lang=source_lang)
                 
                 # Calculate size in points (for PDF consistency)
                 width_pts = page.rect.width
@@ -102,7 +102,7 @@ class OpenCVService:
             height, width = img.shape[:2]
             
             # Process page
-            blocks = self._process_page_image(img, page_num=1, debug_out_dir=debug_path, job_id=job_id, job_status=job_status)
+            blocks = self._process_page_image(img, page_num=1, debug_out_dir=debug_path, job_id=job_id, job_status=job_status, source_lang=source_lang)
             
             # For images, we need to match fitz's handling in translation_service
             # fitz.open(img_path) will create a page with dimensions based on DPI (usually 72 if not set, or image DPI)
@@ -138,7 +138,7 @@ class OpenCVService:
             "ocr_engine": "opencv"
         }
 
-    def _process_page_image(self, img: np.ndarray, page_num: int, debug_out_dir: Path, job_id: str = None, job_status: Dict = None) -> List[Dict]:
+    def _process_page_image(self, img: np.ndarray, page_num: int, debug_out_dir: Path, job_id: str = None, job_status: Dict = None, source_lang: str = "tha_Thai") -> List[Dict]:
         """core layout analysis pipeline"""
         
         # Check cancellation
@@ -178,10 +178,95 @@ class OpenCVService:
         if debug_out_dir:
             cv2.imwrite(str(debug_out_dir / f"page_{page_num}_4_binary.png"), binary)
         
-        # --- 3. Segmentation Pass A: Line Detection ---
-        # Dilation with wide-short kernel (35, 5 for ~180 DPI)
+        if job_status and job_id and job_status.get(job_id, {}).get("cancelled", False):
+            return []
+
+        # --- 3. [NEW] Table Detection ---
+        table_blocks = []
+        table_mask = np.zeros(img.shape[:2], dtype=np.uint8)
+        
+        try:
+            # Enhanced Table Detection (Grid Lines)
+            # Find Horizontal Lines
+            h_kernel_len = np.array(img).shape[1] // 30
+            h_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (h_kernel_len, 1))
+            h_lines = cv2.morphologyEx(binary, cv2.MORPH_OPEN, h_kernel, iterations=1) # Use binary from prev step (inverted)
+            
+            # Find Vertical Lines
+            v_kernel_len = np.array(img).shape[0] // 30
+            v_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, v_kernel_len))
+            v_lines = cv2.morphologyEx(binary, cv2.MORPH_OPEN, v_kernel, iterations=1)
+            
+            # Combine lines (Grid)
+            grid = cv2.addWeighted(h_lines, 0.5, v_lines, 0.5, 0.0)
+            grid = cv2.threshold(grid, 10, 255, cv2.THRESH_BINARY)[1]
+            
+            # Dilate Grid slightly to connect gaps
+            kernel_dilate = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+            grid = cv2.dilate(grid, kernel_dilate, iterations=2)
+            
+            # Find contours of tables
+            contours_tables, _ = cv2.findContours(grid, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            
+            for cnt in contours_tables:
+                x, y, w, h = cv2.boundingRect(cnt)
+                
+                # Minimum size for a table (e.g. 50x50 px)
+                if w < 50 or h < 50: continue
+                
+                # Aspect Ratio check (tables are usually wide rectangles, not thin lines)
+                aspect = w / float(h)
+                if aspect > 10 or aspect < 0.1: continue # Too thin
+                
+                # Check solidity (tables are mostly empty space inside grid lines? No, grid makes it solid-ish)
+                # But grid lines are thin. Let's rely on contour area vs bounding rect area
+                area = cv2.contourArea(cnt)
+                rect_area = w * h
+                solidity = float(area) / rect_area
+                
+                # Tables usually fill their bounding box well (high solidity for grid mask)
+                if solidity < 0.2: continue 
+
+                # Register table block
+                # Padded slightly
+                pad = 5
+                
+                # Create mask to exclude table from text detection
+                # Draw filled rectangle on mask
+                cv2.rectangle(table_mask, (x, y), (x+w, y+h), 255, -1)
+                
+                x1, y1 = max(0, x-pad), max(0, y-pad)
+                x2, y2 = min(img.shape[1], x+w+pad), min(img.shape[0], y+h+pad)
+                
+                table_blocks.append({
+                    "text": "", # Will be filled by OCR (HTML)
+                    "bbox": {"x1": x1, "y1": y1, "x2": x2, "y2": y2},
+                    "label": "table",
+                    "confidence": 1.0,
+                    "crop_bbox": {"x1": x1, "y1": y1, "x2": x2, "y2": y2}
+                })
+                
+                # Debug
+                if debug_out_dir:
+                     cv2.rectangle(img, (x1, y1), (x2, y2), (0, 255, 255), 2) # Yellow for tables
+                     
+            if debug_out_dir:
+                cv2.imwrite(str(debug_out_dir / f"page_{page_num}_4b_tables.png"), grid)
+                
+        except Exception as e:
+            print(f"      ⚠️ Table detection error: {e}")
+
+        # --- 4. Segmentation Pass A: Line Detection ---
+        # Mask out tables first!
+        # Bitwise AND with INVERSE of table_mask
+        # table_mask has 255 (white) where tables are. We want to keep areas where tables are NOT.
+        # So we want (binary AND NOT table_mask)
+        not_table_mask = cv2.bitwise_not(table_mask)
+        binary_no_tables = cv2.bitwise_and(binary, binary, mask=not_table_mask)
+
+        # Dilation Pass A: Wide horizontal kernel → detect individual text lines
         kernel_line = cv2.getStructuringElement(cv2.MORPH_RECT, (35, 5))
-        dilated_lines = cv2.dilate(binary, kernel_line, iterations=1)
+        dilated_lines = cv2.dilate(binary_no_tables, kernel_line, iterations=1)
         
         # Debug 5: Dilated Lines
         if debug_out_dir:
@@ -206,22 +291,24 @@ class OpenCVService:
         
         if job_status and job_id and job_status.get(job_id, {}).get("cancelled", False):
             return []
-
-        # --- 3. Segmentation Pass B: Paragraph Merging ---
+ 
+        # --- 5. Segmentation Pass B: Paragraph Merging ---
         # Sort by Y then X (Top to Bottom, Left to Right)
         # Round Y to nearest 10px to group items in same "row" for sorting
         line_boxes.sort(key=lambda b: (int(b['y']/10), b['x']))
         
         blocks = []
         if not line_boxes:
-            return blocks
+            # Return just tables if no text
+            return table_blocks
             
         current_block = line_boxes[0]
         
         # Calculate median line height for dynamic gap threshold
         lines_heights = [b['h'] for b in line_boxes]
         median_h = np.median(lines_heights) if lines_heights else 20
-        max_gap = 0.5 * median_h # Reduced from 0.8 to 0.5 to avoid merging distant blocks
+        
+        max_gap = 0.75 * median_h  # Gap threshold: allow up to 1.5x line height between lines in same paragraph
         
         for next_box in line_boxes[1:]:
             # Check vertical gap
@@ -231,15 +318,34 @@ class OpenCVService:
             # Vertical proximity check
             is_vertical_close = gap < max_gap
             
-            # Horizontal overlap check
+            # --- Short Last Line Detection ---
+            # A short last line of a paragraph is much narrower than the block above
+            # AND its x-range is contained within the block's x-range.
+            # In this case, merge regardless of gap size.
+            wider_w = max(current_block['w'], next_box['w'])
+            narrower_w = min(current_block['w'], next_box['w'])
+            is_short_last_line = (
+                narrower_w < wider_w * 0.6 and  # next line is < 60% width of current block
+                next_box['x'] >= current_block['x'] - 30 and  # starts within left boundary
+                next_box['x2'] <= current_block['x2'] + 30 and  # ends within right boundary
+                gap < median_h * 3  # but not too far (max 3 line heights away)
+            )
+            
+            # Standard horizontal overlap check
             x_overlap = max(0, min(current_block['x2'], next_box['x2']) - max(current_block['x'], next_box['x']))
-            is_horizontal_aligned = x_overlap > (min(current_block['w'], next_box['w']) * 0.5) # >50% width overlap
+            is_overlap_sufficient = x_overlap > (narrower_w * 0.3)  # 30% overlap
+            is_horizontal_aligned = is_overlap_sufficient
             
             # Height similarity check (Don't merge headers with body text)
             h_ratio = min(current_block['h'], next_box['h']) / max(current_block['h'], next_box['h'])
             is_height_similar = h_ratio > 0.5
             
-            if is_vertical_close and is_horizontal_aligned and is_height_similar:
+            should_merge = (
+                is_short_last_line or  # Short last line → always merge if contained
+                (is_vertical_close and is_horizontal_aligned and is_height_similar)
+            )
+            
+            if should_merge:
                 # Merge
                 current_block['x'] = min(current_block['x'], next_box['x'])
                 current_block['y'] = min(current_block['y'], next_box['y'])
@@ -254,9 +360,15 @@ class OpenCVService:
         blocks.append(current_block) # Append last block
         
         # Format output blocks
-        final_blocks = []
+        final_blocks = table_blocks # START WITH TABLES
         debug_blocks_img = img.copy()
         
+        # Draw tables first in debug
+        for t in table_blocks:
+             x1, y1, x2, y2 = t["bbox"]["x1"], t["bbox"]["y1"], t["bbox"]["x2"], t["bbox"]["y2"]
+             cv2.rectangle(debug_blocks_img, (x1, y1), (x2, y2), (0, 255, 255), 2)
+             cv2.putText(debug_blocks_img, "TABLE", (x1, y1-5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,255), 1)
+
         for i, b in enumerate(blocks):
             # Original BBox (Tight)
             x1, y1 = b['x'], b['y']
@@ -267,9 +379,26 @@ class OpenCVService:
             # If a block has 0-1 contours, it is likely a box or line.
             
             # Crop binary image for this block
-            block_binary = binary[y1:y2, x1:x2]
+            # USE binary_no_tables to ensure we don't validate against table lines
+            block_binary = binary_no_tables[y1:y2, x1:x2]
             if block_binary.size == 0: continue
             
+            # 1. Pixel Density Check (Ratio of white pixels)
+            # Text is usually ~10-40% white in binary (inverted)
+            # Solid blocks are > 90%
+            # Empty/Noise blocks are < 1%
+            white_pixels = cv2.countNonZero(block_binary)
+            total_pixels = block_binary.size
+            if total_pixels == 0: continue
+            density = white_pixels / total_pixels
+            
+            if density < 0.008: # < 0.8% (Even stricter noise check)
+                # Allow if very small but distinct (e.g. page number "1")
+                if b['h'] > 20: continue
+            
+            if density > 0.95: # > 95% (Solid block)
+                continue
+
             # Find contours inside this block
             block_cnts, _ = cv2.findContours(block_binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             
@@ -277,21 +406,28 @@ class OpenCVService:
             valid_chars = 0
             for c in block_cnts:
                 cx, cy, cw, ch = cv2.boundingRect(c)
-                if cw > 2 and ch > 5: # Minimal char size
+                # INCREASED THRESHOLD: Was cw > 3, ch > 8
+                if cw > 3 and ch > 8: 
                     valid_chars += 1
             
             # Heuristic:
             # - If block is large but has few chars -> Graphic/Box
             # - Text usually has many chars
-            if valid_chars < 2:
+            # WAS < 2, NOW < 3 (Need at least 3 distinct "parts" to be text)
+            if valid_chars < 3:
                 # Allow if it's a very small block (maybe a page number "1")
                 # But if height > 20 (approx line height), it should have more parts
                 if b['h'] > 20:
                      continue
             
+            # INCREASED MIN BLOCK SIZE: Was w<10, h<5
+            if (x2 - x1) < 15 or (y2 - y1) < 10:
+                continue
+
             # Crop BBox (Padded for OCR)
-            pad_x = 12
-            pad_y = 12
+            # Increased padding to prevent clipping tops/bottoms of characters
+            pad_x = 20
+            pad_y = 20
             
             cx1 = max(0, x1 - pad_x)
             cy1 = max(0, y1 - pad_y)
@@ -320,6 +456,11 @@ class OpenCVService:
                 "label": "text",
                 "confidence": 1.0
             })
+
+        if debug_out_dir:
+            cv2.imwrite(str(debug_out_dir / f"page_{page_num}_7_blocks_merged.png"), debug_blocks_img)
+        
+        return final_blocks
 
         if debug_out_dir:
             cv2.imwrite(str(debug_out_dir / f"page_{page_num}_7_blocks_merged.png"), debug_blocks_img)

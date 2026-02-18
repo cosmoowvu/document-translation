@@ -76,7 +76,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Document Translation API",
-    description="แปลเอกสาร PDF/PNG/JPG พร้อมรักษา layout",
+    description="แปลเอกสาร PDF/PNG/JPG",
     version="1.0.0",
     lifespan=lifespan
 )

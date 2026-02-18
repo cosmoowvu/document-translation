@@ -66,13 +66,7 @@ def translate_batch_typhoon(
         "zho_Hans": "Chinese (Simplified)",
         "zho_Hant": "Chinese (Traditional)",
         "jpn_Jpan": "Japanese",
-        "kor_Hang": "Korean (Hangul)",
-        "lao_Laoo": "Lao",
-        "mya_Mymr": "Burmese",
-        "khm_Khmr": "Khmer",
-        "vie_Latn": "Vietnamese",
-        "ind_Latn": "Indonesian",
-        "msa_Latn": "Malay",
+        "kor_Hang": "Korean",
     }
     # Fallback to English only if target is explicitly English or unknown Latin
     # For others, use the code itself if not in map (better than forcing English)
@@ -141,8 +135,8 @@ def translate_batch_typhoon(
                     "prompt": prompt,
                     "stream": False,
                     "options": {
-                        "temperature": 0.4,  # Lowered slightly for more stability
-                        "repeat_penalty": 1.15, # Increased to prevent loops/repetition
+                        "temperature": 0.2,  # Lowered further for strictness
+                        "repeat_penalty": 1.15, # Standard penalty (1.35 was too aggressive for Japanese)
                         "num_predict": 4096,  
                         "top_p": 0.9          
                     }
@@ -175,7 +169,17 @@ def translate_batch_typhoon(
                         block_content = re.sub(r'^(Here is the translation:|Translation:|Output:)\s*', '', block_content, flags=re.IGNORECASE)
                         block_content = re.sub(r'^\*+|\*+$', '', block_content)
                         block_content = block_content.strip()
-                        
+
+                        # [NEW] Aggressive Hallucination Check for Repetitive Patterns
+                        # Detect "เก้าเก้าเก้า..." or "aaaaa..."
+                        # Pattern: (any 2+ chars) repeated 5+ times consecutively
+                        repeat_match = re.search(r'(.{2,})\1{4,}', block_content)
+                        if repeat_match:
+                            print(f"   🚨 Block {i+1} repetitive hallucination detected: '{repeat_match.group(1)}'...")
+                            # Truncate at the start of the repetition
+                            block_content = block_content[:repeat_match.start()].strip()
+                            print(f"      ✂️ Truncated repetition")
+
                         # Safety check: Detect hallucination (output way longer than input)
                         src_len = len(texts[i])
                         result_len = len(block_content)

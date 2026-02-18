@@ -24,7 +24,8 @@ class JobLogger:
             "job_id": job_id,
             "start_time": self.start_time.isoformat(),
             "timings": {},
-            "blocks": {}
+            "blocks": {},
+            "detected_languages_count": {}
         }
     
     def log_ocr_start(self):
@@ -77,6 +78,7 @@ class JobLogger:
 
     def log_detected_language(self, detected_lang: str):
         """บันทึกภาษาที่ตรวจพบ (Auto Detect)"""
+        # This might be called once at start, but we prefer accumulating stats
         self.stats["detected_language"] = detected_lang
     
     def log_block(self, page_no: int, block_idx: int, original: str, translated: str, 
@@ -84,6 +86,10 @@ class JobLogger:
         """บันทึก log ของแต่ละ block (พร้อม NLLB translation ถ้ามี)"""
         # Ensure directory exists (defensive)
         self.log_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Track statistics
+        if detected_lang and detected_lang != "unknown":
+             self.stats["detected_languages_count"][detected_lang] = self.stats["detected_languages_count"].get(detected_lang, 0) + 1
         
         log_file = self.log_dir / f"page_{page_no:03d}_blocks.txt"
         
@@ -118,6 +124,10 @@ class JobLogger:
                 detected_lang = cell.get('detected_lang', 'unknown')
                 status = "TRANSLATED" if was_translated else "SKIPPED"
                 
+                # Track stats for table cells too
+                if detected_lang and detected_lang != "unknown":
+                     self.stats["detected_languages_count"][detected_lang] = self.stats["detected_languages_count"].get(detected_lang, 0) + 1
+                
                 f.write(f"Cell [{row},{col}] [{status}] (detected: {detected_lang})\n")
                 f.write(f"  Original: {original}\n")
                 f.write(f"  Result:   {translated}\n")
@@ -148,6 +158,13 @@ class JobLogger:
         
         if "error" not in self.stats:
             self.stats["status"] = "completed"
+        
+        # Calculate most frequent detected language
+        if self.stats["detected_languages_count"]:
+            import operator
+            most_common = max(self.stats["detected_languages_count"].items(), key=operator.itemgetter(1))[0]
+            self.stats["detected_language"] = most_common
+            print(f"      🤖 Final Detected Language: {most_common} (from blocks)")
         
         # Ensure directory exists (defensive)
         self.log_dir.mkdir(parents=True, exist_ok=True)

@@ -99,6 +99,59 @@ class TableTranslator:
         
         return ''.join(translated_parts)
     
+    def translate_ocr_table_block(
+        self,
+        text: str,
+        target_lang: str,
+        src_lang: str = "tha_Thai"
+    ) -> str:
+        """
+        [NEW] Translate raw OCR text (Markdown/Plain) => HTML Table
+        Used when OpenCV detects a table but OCR returns text.
+        """
+        if not text.strip():
+            return text
+            
+        print(f"   📊 Table Block (OCR Text): Translating {len(text)} chars -> HTML Table")
+        
+        # Construct Prompt
+        # Force Typhoon to output HTML table
+        prompt = (
+            f"Translate the following text from {src_lang} to {target_lang}.\n"
+            "The input is a table structure (could be Markdown, CSV, or loose text).\n"
+            "CRITICAL RULES:\n"
+            "1. Output the result as a valid HTML `<table>` structure.\n"
+            "2. Preserve the rows and columns as best as possible.\n"
+            "3. Do NOT add any explanations or markdown code blocks (```html).\n"
+            "4. Output ONLY the HTML <table>...</table> code.\n\n"
+            f"Input:\n{text}\n\n"
+            "Output (HTML Table):"
+        )
+        
+        try:
+            # Call LLM directly (no batching for full table reconstruction)
+            # Use lower temperature for structure preservation
+            response = self.llm.generate(
+                prompt, 
+                temperature=0.1, 
+                max_tokens=2048
+            )
+            
+            # Extract table if wrapped in markdown
+            match = re.search(r'<table>.*?</table>', response, re.DOTALL | re.IGNORECASE)
+            if match:
+                return match.group(0)
+            
+            # If no table tags found, but has <tr>...
+            if '<tr>' in response:
+                return f"<table>{response}</table>"
+                
+            return response # Fallback: return raw response (hope it's table-like)
+            
+        except Exception as e:
+            print(f"      ⚠️ Failed to translate OCR table: {e}")
+            return text
+
     def _translate_table_cells(
         self,
         table_html: str,
@@ -119,6 +172,7 @@ class TableTranslator:
             return table_html
         
         print(f"   📊 HTML Table: Extracted {len(cells)} cells for translation")
+        print(f"      📝 Sample cells: {cells[:3]}") # Debug
         
         # Detect language if auto
         if src_lang == "auto":
@@ -140,6 +194,19 @@ class TableTranslator:
                      detected = self.llm.detect_language(sample_text[:500])
             
             src_lang = detected
+            if src_lang == "unknown":
+                # Detect script
+                has_thai = any('\u0e00' <= c <= '\u0e7f' for c in sample_text)
+                has_korean = any('\uac00' <= c <= '\ud7af' for c in sample_text)
+                has_kana = any('\u3040' <= c <= '\u30ff' for c in sample_text)
+                has_chinese = any('\u4e00' <= c <= '\u9fff' for c in sample_text)
+
+                if has_thai: src_lang = "tha_Thai"
+                elif has_korean: src_lang = "kor_Hang"
+                elif has_kana: src_lang = "jpn_Jpan"
+                elif has_chinese: src_lang = "zho_Hans"
+                else: src_lang = "eng_Latn"
+                print(f"      ⚠️ Defaulting unknown source -> {src_lang}")
             print(f"      🤖 Table Language Detected: {src_lang}")
         
         # แปลแต่ละ cell
@@ -155,6 +222,7 @@ class TableTranslator:
             
             # Use Typhoon Direct
             chunk_results, failed_indices = self.llm.translate_batch_typhoon(chunk, target_lang, src_lang)
+            print(f"      📝 Translated: {chunk_results}") # Debug
             
             # Post-validation: Check for wrong language
             forbidden_scripts = []

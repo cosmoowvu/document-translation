@@ -95,8 +95,8 @@ def run_ocr_pipeline(
         block_args = [(i, b, pdf_page, page_num_key, crop_dir, job_id, job_status, source_lang) for i, b in enumerate(blocks)]
         
         # Batch processing
-        batch_size = 5
-        max_workers = 5
+        batch_size = 3
+        max_workers = 3
         
         # Custom ThreadPoolExecutor for responsive cancellation
         executor = ThreadPoolExecutor(max_workers=max_workers)
@@ -212,7 +212,7 @@ def process_single_block(i, block, pdf_page, page_num_key, crop_dir, job_id, job
             import math
             std_dev = math.sqrt(var)
             
-            if std_dev < 10.0:
+            if std_dev < 10.0 and block.get("label") != "table":
                 block["text"] = "" 
                 return False
                 
@@ -221,6 +221,10 @@ def process_single_block(i, block, pdf_page, page_num_key, crop_dir, job_id, job
         return False
     
     # OCR Request with Retry
+    is_table = block.get("label") == "table"
+    if is_table:
+        print(f"      📊 Processing Table Block {i+1}...")
+
     for attempt in range(4): # Initial + 3 Retries
         if job_status.get(job_id, {}).get("cancelled", False):
             return False
@@ -231,27 +235,12 @@ def process_single_block(i, block, pdf_page, page_num_key, crop_dir, job_id, job
                 from app.services.ocr.typhoon_service import TyphoonOCRService
                 ocr_service._typhoon = TyphoonOCRService()
                 
-            crop_result = ocr_service._typhoon.process_document(
-                str(crop_path), 
-                source_lang,
-                job_id=job_id,
-                job_status=job_status
+            # Use direct VLM call with strict OCR prompt (prevents hallucination)
+            extracted_text = ocr_service._typhoon.process_image_direct(
+                str(crop_path),
+                source_lang=source_lang,
+                is_table=is_table
             )
-            
-            extracted_text = ""
-            # Parse result
-            page_data = None
-            if "pages" in crop_result:
-                if 1 in crop_result["pages"]:
-                    page_data = crop_result["pages"][1]
-                elif "1" in crop_result["pages"]:
-                    page_data = crop_result["pages"]["1"]
-            
-            if page_data and "blocks" in page_data and page_data["blocks"]:
-                 extracted_text = page_data["blocks"][0].get("text", "")
-            
-            if not extracted_text and "text" in crop_result:
-                extracted_text = crop_result["text"]
 
             block["text"] = extracted_text.strip()
             block["original_text"] = extracted_text.strip()

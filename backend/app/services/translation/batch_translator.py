@@ -5,6 +5,7 @@ Handles batch translation logic with retry and chunking
 import re
 from typing import List, Dict, Tuple
 
+
 from app.services.text_processor import normalize_text, should_translate
 from app.services.llm_service import LLMService
 from app.config import settings
@@ -20,6 +21,9 @@ def count_words(text: str) -> int:
     """นับจำนวนคำ รวม marker ###BLOCKn### ด้วย"""
     words = re.findall(r'\S+|\s+', text)
     return len(words)
+
+
+
 
 
 def split_long_block(text: str, max_words: int = MAX_WORDS_PER_BLOCK) -> List[str]:
@@ -93,7 +97,50 @@ class BatchTranslator:
         self.llm = llm_service
         self.batch_size = batch_size
         self.max_retries = 2
+
     
+    
+    def _is_valid_translation(self, text: str, source_lang: str) -> bool:
+        """
+        Check if translation is valid (does not contain > 5% source characters).
+        Targeting CJKT languages.
+        """
+        if not text: return True
+        
+        # Define ranges
+        ranges = []
+        if source_lang in ["tha_Thai", "th"]:
+            ranges.append(('\u0e00', '\u0e7f'))
+        elif source_lang in ["jpn_Jpan", "ja"]:
+            ranges.append(('\u3040', '\u30ff')) # Kana
+            ranges.append(('\u4e00', '\u9fff')) # Kanji
+        elif source_lang in ["zho_Hans", "zho_Hant", "zh", "zh-cn"]:
+            ranges.append(('\u4e00', '\u9fff'))
+        elif source_lang in ["kor_Hang", "ko"]:
+            ranges.append(('\uac00', '\ud7af'))
+        
+        if not ranges:
+            return True # Not a target language for validation
+            
+        total_chars = len(text)
+        if total_chars == 0: return True
+        
+        source_chars = 0
+        for char in text:
+            for start, end in ranges:
+                if start <= char <= end:
+                    source_chars += 1
+                    break
+        
+        ratio = source_chars / total_chars
+        # Debug print
+        if ratio > 0.05:
+            print(f"      ⚠️  Validation Failed: {source_lang} ratio={ratio:.2f} (threshold 0.05)")
+        
+        # If > 5% source chars, consider invalid (failed translation)
+        return ratio <= 0.05
+
+
     def translate_blocks(
         self, 
         blocks: List[Dict], 
@@ -129,7 +176,8 @@ class BatchTranslator:
             
             # Split long blocks to avoid context overflow
             if (isinstance(text, str) and len(text) > MAX_WORDS_PER_BLOCK * 10 
-                and '<table>' not in text.lower()):  # Don't split tables
+                and '<table>' not in text.lower()
+                and block.get("label") != "table"):  # Don't split tables (HTML or OCR)
                 chunks = split_long_block(text, max_words=MAX_WORDS_PER_BLOCK)
                 print(f"      → แบ่งเป็น {len(chunks)} chunks")
             else:
@@ -141,10 +189,35 @@ class BatchTranslator:
                 #  Check if chunk contains HTML table
                 has_html_table = '<table>' in chunk.lower() and '</table>' in chunk.lower()
                 
+                # [NEW] Check if it is a labelled table from OpenCV
+                is_ocr_table = block.get("label") == "table"
+                
                 # Per-block hybrid detection
                 need, detected_lang = should_translate(chunk, target_lang)
                 
-                # If in auto mode and detected as unknown/eng_Latn (ambiguous), use LLM for accuracy
+                # [NEW] Enhanced Script Detection for ALL blocks (Table or Text)
+                # If detected as unknown or ambiguous English, check scripts
+                if detected_lang == "unknown" or (source_lang == "auto" and detected_lang == "eng_Latn"):
+                    has_thai = any('\u0e00' <= c <= '\u0e7f' for c in chunk)
+                    has_korean = any('\uac00' <= c <= '\ud7af' for c in chunk)
+                    has_kana = any('\u3040' <= c <= '\u30ff' for c in chunk)
+                    has_chinese = any('\u4e00' <= c <= '\u9fff' for c in chunk)
+                    
+                    if has_thai: detected_lang = "tha_Thai"
+                    elif has_korean: detected_lang = "kor_Hang"
+                    elif has_kana: detected_lang = "jpn_Jpan"
+                    elif has_chinese: detected_lang = "zho_Hans" 
+                    
+                    # Update need flag if language changed
+                    if detected_lang != target_lang:
+                        need = True
+
+                # Force translate if it's an OCR table (needs formatting)
+                if is_ocr_table:
+                    need = True
+                    print(f"      📊 Force translating OCR table block (lang: {detected_lang})")
+                
+                # If in auto mode and still unknown/eng_Latn (ambiguous), use LLM for accuracy
                 if source_lang == "auto" and detected_lang in ["unknown", "eng_Latn"]:
                     # Check if rule-based was certain (has CJK/Thai characters)
                     has_cjk_thai = any('\u0e00' <= c <= '\u0e7f' or  # Thai
@@ -172,7 +245,8 @@ class BatchTranslator:
                     'detected_lang': detected_lang,
                     'original_idx': idx,       # Link back to original block
                     'result_text': chunk if not need else None,  # Pre-fill if skipped
-                    'has_html_table': has_html_table  # Flag for special handling
+                    'has_html_table': has_html_table,  # Flag for HTML table
+                    'is_ocr_table': is_ocr_table      # Flag for OCR table block
                 }
                 
                 all_tasks.append(task)
@@ -190,12 +264,12 @@ class BatchTranslator:
             lang_summary = ", ".join([f"{lang} ({count})" for lang, count in sorted(lang_stats.items(), key=lambda x: -x[1])])
             print(f"   📊 Detected Languages: {lang_summary}")
         
-        # 2. Handle HTML Tables separately (from images)
+        # 2. Handle HTML/OCR Tables separately (from images)
         html_table_indices = []
         regular_translate_indices = []
         
         for idx in to_translate_indices:
-            if all_tasks[idx].get('has_html_table', False):
+            if all_tasks[idx].get('has_html_table', False) or all_tasks[idx].get('is_ocr_table', False):
                 html_table_indices.append(idx)
             else:
                 regular_translate_indices.append(idx)
@@ -205,16 +279,27 @@ class BatchTranslator:
             from .table_translator import TableTranslator
             table_translator = TableTranslator(self.llm)
             
-            print(f"   📊 HTML Tables: {len(html_table_indices)} blocks detected")
+            print(f"   📊 Tables (HTML/OCR): {len(html_table_indices)} blocks detected")
             
             # Use global source_lang instead of per-block detection
             for idx in html_table_indices:
                 task = all_tasks[idx]
-                translated_html = table_translator.translate_html_table_block(
-                    task['text'],
-                    target_lang,
-                    source_lang  # Use global source_lang
-                )
+                
+                if task.get('is_ocr_table'):
+                    # Call NEW method for OCR tables (Text -> HTML)
+                    translated_html = table_translator.translate_ocr_table_block(
+                        task['text'],
+                        target_lang,
+                        source_lang
+                    )
+                else:
+                    # Call standard HTML table translator
+                    translated_html = table_translator.translate_html_table_block(
+                        task['text'],
+                        target_lang,
+                        source_lang  # Use global source_lang
+                    )
+                    
                 task['result_text'] = translated_html
                 stats["translated"] += 1
         
@@ -316,33 +401,84 @@ class BatchTranslator:
                         unload_model(qwen_model, settings.OLLAMA_URL)
                         preload_model(typhoon_model, settings.OLLAMA_URL)
 
-                
-                # Assign results back to tasks
-                for res_text in batch_results:
-                    task_idx = to_translate_indices[current_translate_idx]
-                    
-                    # Log failure if empty and not skipped
-                    if not res_text.strip():
-                        print(f"      ⚠️ Chunk translation failed, using original")
-                        res_text = all_tasks[task_idx]['original_text']
-                    
-                    all_tasks[task_idx]['result_text'] = res_text
+                # --- Step 3: Quality Check & Retry / Fallback ---
+                for i in range(len(batch_results)):
+                    text_result = batch_results[i]
+                    original_text = batch_texts[i]
+
+                    batch_start_idx = batch_idx * self.batch_size
+                    global_idx_in_translate_list = batch_start_idx + i
+
+                    if global_idx_in_translate_list < len(to_translate_indices):
+                        task_idx = to_translate_indices[global_idx_in_translate_list]
+                        detected_lang = all_tasks[task_idx].get('detected_lang', 'unknown')
+                    else:
+                        task_idx = None
+                        detected_lang = 'unknown'
+
+                    # Check validation for CJKT
+                    if not self._is_valid_translation(text_result, detected_lang):
+                        print(f"      ⚠️  Validation Failed: {detected_lang} (Original returned or too much source text)")
+
+                        # Retry with Typhoon (Single Block)
+                        print(f"      🔄 Retrying with Typhoon (Single Block)...")
+                        try:
+                            retry_src = detected_lang if detected_lang != "unknown" else src_lang
+                            retry_res, _ = self.llm.translate_batch_typhoon(
+                                [original_text],
+                                target_lang,
+                                retry_src,
+                                job_status,
+                                job_id
+                            )
+                            if retry_res:
+                                retry_text = retry_res[0]
+                                if self._is_valid_translation(retry_text, detected_lang):
+                                    text_result = retry_text
+                                    print(f"      ✅ Retry Successful")
+                                else:
+                                    print(f"      ❌ Retry Failed Validation")
+                        except Exception as e:
+                            print(f"      ❌ Retry Error: {e}")
+
+                    # Update result in batch array
+                    batch_results[i] = text_result
+
+                    # Assign result back to task
+                    if task_idx is not None:
+                        # Log failure if empty and not skipped
+                        if not text_result.strip():
+                            print(f"      ⚠️ Chunk translation failed, using original")
+                            text_result = all_tasks[task_idx]['original_text']
+
+                        all_tasks[task_idx]['result_text'] = text_result
+                        all_tasks[task_idx]['detected_lang'] = detected_lang
+                        stats["translated"] += 1
+
                     current_translate_idx += 1
-                    stats["translated"] += 1
         
         # 3. Reconstruct Blocks
         # Group tasks by original_idx
-        from collections import defaultdict
+        from collections import defaultdict, Counter
         block_parts = defaultdict(list)
+        block_langs = defaultdict(list)
         
         for task in all_tasks:
             block_parts[task['original_idx']].append(task['result_text'])
+            block_langs[task['original_idx']].append(task.get('detected_lang', 'unknown'))
             
         final_results = []
         for idx, block in enumerate(blocks):
             if idx in block_parts:
                 parts = block_parts[idx]
+                langs = block_langs[idx]
                 
+                # Determine dominant language
+                if langs:
+                    dominant_lang = Counter(langs).most_common(1)[0][0]
+                else:
+                    dominant_lang = "unknown"
+
                 # Join parts
                 # Try to preserve original separator if possible
                 original_text = block["text"]
@@ -350,13 +486,16 @@ class BatchTranslator:
                 elif "\n" in original_text: joiner = "\n"
                 else: joiner = " "
                 
+                # Filter out None values (failed translations) - fall back to original text
+                parts = [p if p is not None else block["text"] for p in parts]
+                
                 final_text = joiner.join(parts)
                 
                 final_results.append({
                     **block,
                     "original_text": block["text"],
                     "text": final_text,
-                    "detected_lang": block.get("detected_lang", "unknown"), # Use original detected or mixed?
+                    "detected_lang": dominant_lang, # Use newly detected language
                     "was_translated": True
                 })
             else:

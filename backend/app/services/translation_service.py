@@ -203,7 +203,7 @@ def process_translation(job_id: str, file_path: str, source_lang: str, target_la
                 # Update progress (50-80%)
                 progress = 50 + int((page_no / total_pages) * 30)
                 job_status[job_id]["progress"] = progress
-                job_status[job_id]["message"] = f"แปลหน้า {page_no}/{total_pages}... (แปล {stats['translated']}, ข้าม {stats['skipped']})"
+                job_status[job_id]["message"] = f"แปลหน้า {page_no}/{total_pages}..."
             
         translate_duration = time.time() - translate_start
         logger.log_translation_complete(total_translated, total_skipped, translate_duration)
@@ -241,8 +241,8 @@ def process_translation(job_id: str, file_path: str, source_lang: str, target_la
                 "languages": final_stats.get("languages", {}),
                 "ocr_engine": "typhoon (opencv)",
                 "translation_mode": "typhoon_direct",
-                "translation_mode": "typhoon_direct",
-                "detected_language": source_lang if source_lang != "auto" else "tha_Thai" # Approximated
+                # Use detected language from logger stats, fallback to approximation
+                "detected_language": final_stats.get("detected_language", "tha_Thai" if source_lang == "auto" else source_lang)
             }
         }
         

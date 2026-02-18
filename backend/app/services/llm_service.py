@@ -64,19 +64,28 @@ class LLMService:
     def detect_language(self, text: str) -> str:
         """
         Detect language using LLM (More robust than regex)
-        Dynamic detection: Returns standard code (e.g. eng_Latn, tha_Thai, fra_Latn)
+        Only returns codes for the 5 supported languages:
+        eng_Latn, tha_Thai, jpn_Jpan, zho_Hans, kor_Hang
         """
         if not text or len(text.strip()) < 5:
             return "eng_Latn"
             
-        # Dynamic prompt - ask LLM to identify and return standard code
+        # Prompt focused on 5 supported languages
         prompt = (
             "Identify the language of the following text.\n"
-            "Return ONLY the standardized ISO 639-3 code (e.g., eng_Latn, tha_Thai, jpn_Jpan, zho_Hans, fra_Latn, spa_Latn, etc.).\n"
-            "If the script is Latin, append '_Latn'. If Thai, '_Thai'. If unsure, return 'eng_Latn'.\n"
+            "Return ONLY one of these exact codes: eng_Latn, tha_Thai, jpn_Jpan, zho_Hans, kor_Hang\n"
+            "- eng_Latn = English (or any Latin-script language)\n"
+            "- tha_Thai = Thai\n"
+            "- jpn_Jpan = Japanese\n"
+            "- zho_Hans = Chinese (Simplified or Traditional)\n"
+            "- kor_Hang = Korean\n"
+            "If unsure or the language is not in the list, return eng_Latn.\n"
             "Do not explain. Return ONLY the code.\n\n"
             f"Text: \"{text[:500]}\""
         )
+        
+        # Supported language codes
+        SUPPORTED_LANGS = {"eng_Latn", "tha_Thai", "jpn_Jpan", "zho_Hans", "zho_Hant", "kor_Hang"}
         
         try:
             print(f"   🔍 Asking LLM to detect language...")
@@ -88,36 +97,34 @@ class LLMService:
                     "stream": False,
                     "options": {"temperature": 0.1, "num_predict": 10}
                 },
-                timeout=120  # ✅ Increased to 120s to allow model loading time
+                timeout=120
             )
             
             if resp.status_code == 200:
                 result = resp.json().get("response", "").strip()
                 
-                # Check if result looks like a code (e.g. xyz_Script)
-                # Matches: 3 lowercase letters, underscore, 4 letters (Script)
-                # Or just 2-3 letters (ISO 639-1/2) fallback
+                # Check if result is one of our supported codes
                 match = re.search(r'([a-z]{2,3}_[A-Za-z]{4})', result)
                 if match:
-                    return match.group(1)
+                    code = match.group(1)
+                    if code in SUPPORTED_LANGS:
+                        # Normalize Traditional Chinese to Simplified
+                        if code == "zho_Hant":
+                            return "zho_Hans"
+                        return code
                 
-                # Fallback: if LLM returns just "Thai" or "English"
-                # We do a basic mapping for common ones, but accept others if we can normalize
+                # Fallback: map common language names to supported codes
                 result_lower = result.lower()
-                
-                # Dynamic mapping helper could be here, but for now specific overrides
                 if "thai" in result_lower: return "tha_Thai"
                 if "english" in result_lower: return "eng_Latn"
                 if "japan" in result_lower: return "jpn_Jpan"
-                if "chinese" in result_lower:
-                    return "zho_Hans" if "simplified" in result_lower else "zho_Hant" if "traditional" in result_lower else "zho_Hans"
+                if "chinese" in result_lower: return "zho_Hans"
                 if "korea" in result_lower: return "kor_Hang"
                 
-                # If it returns a simple code like "en", "th"
+                # Simple 2-letter codes
                 if re.match(r'^[a-z]{2,3}$', result_lower):
-                    # Basic mapping
                     simple_map = {"en": "eng_Latn", "th": "tha_Thai", "ja": "jpn_Jpan", "zh": "zho_Hans", "ko": "kor_Hang"}
-                    return simple_map.get(result_lower, f"{result_lower}_Latn") # Default to Latn script if unknown
+                    return simple_map.get(result_lower, "eng_Latn")
 
                 return "eng_Latn"
             else:
@@ -127,6 +134,40 @@ class LLMService:
             
         return "eng_Latn"
     
+    def generate(self, prompt: str, temperature: float = 0.2, max_tokens: int = 4096) -> str:
+        """
+        Generate text from prompt (Direct Ollama Call)
+        Used for special tasks like table reconstruction where structure matters.
+        """
+        try:
+            print(f"   🤖 LLM Generate (temp={temperature})...")
+            resp = requests.post(
+                self.url,
+                json={
+                    "model": self.model,
+                    "prompt": prompt,
+                    "stream": False,
+                    "options": {
+                        "temperature": temperature, 
+                        "num_predict": max_tokens
+                    }
+                },
+                timeout=120
+            )
+            
+            if resp.status_code == 200:
+                result = resp.json().get("response", "").strip()
+                # Clean up common prefixes from chat models
+                result = re.sub(r'^(Here is the translation:|Translation:|Output:)\s*', '', result, flags=re.IGNORECASE)
+                return result
+            else:
+                print(f"   ⚠️ LLM Generate API Error: {resp.status_code} - {resp.text}")
+                return ""
+                
+        except Exception as e:
+            print(f"   ⚠️ LLM Generate Error: {e}")
+            return ""
+
     def translate_batch_llm(self, texts: List[str], target_lang: str, src_lang: str = "tha_Thai") -> List[str]:
         """
         แปล batch (รองรับทุก LLM: Qwen, Gemma, Llama)
