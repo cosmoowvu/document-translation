@@ -6,88 +6,13 @@ import re
 from typing import List, Dict, Tuple
 
 
-from app.services.text_processor import normalize_text, should_translate
+from app.services.text_processor import normalize_text, should_translate, count_words, split_long_block, MAX_WORDS_PER_BLOCK
 from app.services.llm_service import LLMService
 from app.config import settings
 from app.services.translation.qwen_translator import translate_blocks_qwen
 from app.services.translation.model_manager import unload_model, load_model, preload_model
 
-# Batch Size Constants
-MAX_WORDS_PER_BLOCK = 200      # ✅ เพิ่มจาก 70 → 200 เพราะ NLLB รับได้ 1024 tokens แล้ว
 MAX_BLOCKS_PER_BATCH = 3       # จำนวน blocks สูงสุดต่อ batch (ตรงกับ config)
-
-
-def count_words(text: str) -> int:
-    """นับจำนวนคำ รวม marker ###BLOCKn### ด้วย"""
-    words = re.findall(r'\S+|\s+', text)
-    return len(words)
-
-
-
-
-
-def split_long_block(text: str, max_words: int = MAX_WORDS_PER_BLOCK) -> List[str]:
-    """
-    แบ่งข้อความที่มีคำเกิน max_words เป็น chunks เล็กๆ
-    - แบ่งตามประโยค (. ! ?)
-    - สำหรับภาษาไทย แบ่งตามเว้นวรรค
-    """
-    word_count = count_words(text)
-    
-    if word_count <= max_words:
-        return [text]
-    
-    chunks = []
-    
-    # แบ่งตามประโยค (รองรับ Eng และ Thai spaces)
-    # 1. Split by sentence endings (.!?) followed by space
-    # 2. Or split by double spaces (common in PDF extractions)
-    # 3. Or split by newline
-    sentences = re.split(r'(?<=[.!?])\s+|(?<=\s\s)|\n+', text)
-    
-    current_chunk = ""
-    current_word_count = 0
-    
-    for sentence in sentences:
-        sentence = sentence.strip()
-        if not sentence:
-            continue
-
-            
-        sentence_words = count_words(sentence)
-        
-        if current_word_count + sentence_words <= max_words:
-            current_chunk += sentence + " "
-            current_word_count += sentence_words
-        else:
-            if current_chunk:
-                chunks.append(current_chunk.strip())
-            current_chunk = sentence + " "
-            current_word_count = sentence_words
-    
-    if current_chunk:
-        chunks.append(current_chunk.strip())
-    
-    # ถ้าแบ่งไม่ได้ (ประโยคเดียวยาวกว่า limit) → ตัดตามคำ
-    final_chunks = []
-    for chunk in chunks:
-        if count_words(chunk) > max_words:
-            words = chunk.split()
-            temp_chunk = ""
-            for word in words:
-                if count_words(temp_chunk + " " + word) <= max_words:
-                    temp_chunk += word + " "
-                else:
-                    if temp_chunk:
-                        final_chunks.append(temp_chunk.strip())
-                    temp_chunk = word + " "
-            if temp_chunk:
-                final_chunks.append(temp_chunk.strip())
-        else:
-            final_chunks.append(chunk)
-    
-    return [c for c in final_chunks if c.strip()]
-
 
 class BatchTranslator:
     """
@@ -380,7 +305,7 @@ class BatchTranslator:
                         unload_model(typhoon_model, settings.OLLAMA_URL)
                         
                         # Load Qwen
-                        qwen_model = "qwen2.5:3b"
+                        qwen_model = settings.FALLBACK_MODEL
                         load_model(qwen_model, settings.OLLAMA_URL)
                         
                         # Translate with Qwen

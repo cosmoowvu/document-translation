@@ -102,7 +102,7 @@ export const TranslationUI = {
             stepExtract.classList.add('active');
             stepTranslate.classList.add('pending');
             stepRender.classList.add('pending');
-        } else if (percent < 80) {
+        } else if (percent < 90) {
             stepAnalyze.classList.add('done');
             stepExtract.classList.add('done');
             stepTranslate.classList.add('active');
@@ -362,8 +362,19 @@ export const TranslationUI = {
         let currentTranslated = '';
         let currentSection = null;  // Track which section we're in
         let currentTable = null;
+        let inQwen3Section = false;
 
         for (const line of lines) {
+            // Detect QWEN3 CORRECTIONS section header
+            if (line.trim() === 'QWEN3 CORRECTIONS') {
+                inQwen3Section = true;
+                continue;
+            }
+            // Reset QWEN3 section on next separator-only line (=== or ---)
+            if (inQwen3Section && line.startsWith('='.repeat(10))) {
+                continue; // skip the === line
+            }
+
             // Match table header
             const tableMatch = line.match(/^TABLE (\d+) \[(\d+)x(\d+)\]$/);
             if (tableMatch) {
@@ -372,7 +383,8 @@ export const TranslationUI = {
                         num: currentBlock.num,
                         original: currentOriginal.trim(),
                         translated: currentTranslated.trim(),
-                        isTable: false
+                        isTable: false,
+                        isQwen3: currentBlock.isQwen3 || false
                     });
                     currentBlock = null;
                 }
@@ -399,36 +411,54 @@ export const TranslationUI = {
                         num: currentBlock.num,
                         original: currentOriginal.trim(),
                         translated: currentTranslated.trim(),
-                        isTable: !!currentTable
+                        isTable: !!currentTable,
+                        isQwen3: currentBlock.isQwen3 || false
                     });
                 }
                 currentBlock = {
                     num: `[${cellMatch[1]},${cellMatch[2]}]`,
                     status: cellMatch[3],
                     lang: cellMatch[4],
-                    isCell: true
+                    isCell: true,
+                    isQwen3: false
                 };
                 currentOriginal = '';
                 currentTranslated = '';
                 continue;
             }
 
-            // Match block header
-            const blockMatch = line.match(/^Block (\d+) \[(TRANSLATED|SKIPPED)\] \(detected: (.+)\)$/);
+            // Match block header (with optional [QWEN3] tag)
+            const blockMatch = line.match(/^Block (\d+) \[(TRANSLATED|SKIPPED)\](?: \[QWEN3\])? \(detected: (.+)\)$/);
             if (blockMatch) {
                 if (currentBlock) {
-                    blocks.push({
-                        num: currentBlock.num,
+                    // If this is a QWEN3 correction, update the existing block
+                    const existingIdx = blocks.findIndex(b => b.num === currentBlock.num && !b.isTable);
+                    const newBlock = {
+                        num: blockMatch[1],
                         original: currentOriginal.trim(),
                         translated: currentTranslated.trim(),
-                        isTable: false
-                    });
+                        isTable: false,
+                        isQwen3: inQwen3Section || line.includes('[QWEN3]')
+                    };
+                    if (inQwen3Section && existingIdx >= 0) {
+                        // Replace the existing entry with the Qwen3-fixed one
+                        blocks[existingIdx] = newBlock;
+                    } else {
+                        blocks.push({
+                            num: currentBlock.num,
+                            original: currentOriginal.trim(),
+                            translated: currentTranslated.trim(),
+                            isTable: false,
+                            isQwen3: currentBlock.isQwen3 || false
+                        });
+                    }
                 }
                 currentTable = null;
                 currentBlock = {
                     num: blockMatch[1],
                     status: blockMatch[2],
-                    lang: blockMatch[3]
+                    lang: blockMatch[3],
+                    isQwen3: inQwen3Section || line.includes('[QWEN3]')
                 };
                 currentOriginal = '';
                 currentTranslated = '';
@@ -459,23 +489,34 @@ export const TranslationUI = {
 
         // Save last block
         if (currentBlock) {
-            blocks.push({
+            const existingIdx = blocks.findIndex(b => b.num === currentBlock.num && !b.isTable);
+            const lastBlock = {
                 num: currentBlock.num,
                 original: currentOriginal.trim(),
                 translated: currentTranslated.trim(),
-                isTable: !!currentTable
-            });
+                isTable: !!currentTable,
+                isQwen3: currentBlock.isQwen3 || false
+            };
+            if (inQwen3Section && existingIdx >= 0) {
+                blocks[existingIdx] = lastBlock;
+            } else {
+                blocks.push(lastBlock);
+            }
         }
 
         return blocks;
     },
 
     // Create combined block HTML
-    createCombinedBlockHTML(blockNum, originalText, nllbText, translatedText, pageNum, isTable = false, isHeader = false) {
+    createCombinedBlockHTML(blockNum, originalText, nllbText, translatedText, pageNum, isTable = false, isHeader = false, isQwen3 = false) {
         const blockId = `p${pageNum}_b${blockNum}`;
         const tableClass = isTable ? 'table-cell' : '';
         const headerClass = isHeader ? 'table-header' : '';
         const labelPrefix = isTable && !isHeader ? 'Cell' : (isTable ? '' : 'Block');
+
+        const qwen3Badge = isQwen3
+            ? `<span style="background:#ede7f6;color:#6a1fa2;padding:2px 7px;border-radius:10px;font-size:0.72rem;margin-left:6px;font-weight:600;">🤖 Qwen3</span>`
+            : '';
 
         const escapeHTML = (text) => {
             const div = document.createElement('div');
@@ -485,7 +526,7 @@ export const TranslationUI = {
 
         return `
             <div class="combined-block ${tableClass} ${headerClass}" data-block-id="${blockId}" data-page="${pageNum}">
-                <div class="block-label">${labelPrefix} ${blockNum}</div>
+                <div class="block-label">${labelPrefix} ${blockNum}${qwen3Badge}</div>
                 <div class="block-row-cards">
                     <div class="text-card original-card">
                         <div class="card-header">
@@ -596,7 +637,16 @@ export const TranslationUI = {
                 const blocks = this.parseBlockLog(logText, pageNum);
 
                 blocks.forEach(block => {
-                    combinedHTML += this.createCombinedBlockHTML(block.num, block.original, undefined, block.translated, pageNum, block.isTable, block.isHeader);
+                    combinedHTML += this.createCombinedBlockHTML(
+                        block.num,
+                        block.original,
+                        undefined,
+                        block.translated,
+                        pageNum,
+                        block.isTable,
+                        block.isHeader,
+                        block.isQwen3 || false
+                    );
                 });
             }
 

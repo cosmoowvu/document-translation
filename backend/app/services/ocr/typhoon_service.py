@@ -38,9 +38,30 @@ class TyphoonOCRService:
         ext = os.path.splitext(image_path)[1].lower()
         mime_type = "image/png" if ext == ".png" else "image/jpeg"
 
+        # Map language code to human-readable name + script hint
+        lang_hints = {
+            "tha_Thai": ("Thai", "Thai script (เช่น ก ข ค ง)"),
+            "th":        ("Thai", "Thai script (เช่น ก ข ค ง)"),
+            "jpn_Jpan":  ("Japanese", "Japanese script — carefully distinguish similar characters: ソ/ン, シ/ツ, ロ/口, ウ/ワ, ク/タ"),
+            "ja":        ("Japanese", "Japanese script — carefully distinguish similar characters: ソ/ン, シ/ツ, ロ/口, ウ/ワ, ク/タ"),
+            "zho_Hans":  ("Simplified Chinese", "Simplified Chinese characters (简体字)"),
+            "zho_Hant":  ("Traditional Chinese", "Traditional Chinese characters (繁體字)"),
+            "zh":        ("Chinese", "Chinese characters (汉字/漢字)"),
+            "zh-cn":     ("Simplified Chinese", "Simplified Chinese characters (简体字)"),
+            "kor_Hang":  ("Korean", "Korean Hangul script (한글) — carefully distinguish similar characters: 인/임, 은/큰"),
+            "ko":        ("Korean", "Korean Hangul script (한글) — carefully distinguish similar characters: 인/임, 은/큰"),
+            "eng_Latn":  ("English", "Latin script"),
+        }
+        lang_name, script_hint = lang_hints.get(source_lang, ("the document's language", "the characters as they appear"))
+        lang_instruction = (
+            f"This image contains {lang_name} text ({script_hint}). "
+            "Pay close attention to characters that may look visually similar and transcribe each one accurately. "
+        )
+
         # Build prompt based on block type
         if is_table:
             user_prompt = (
+                f"{lang_instruction}"
                 "Read all text in this image exactly as it appears. "
                 "Output the content as a markdown table. "
                 "Do not add, remove, or change any text. "
@@ -48,12 +69,14 @@ class TyphoonOCRService:
             )
         else:
             user_prompt = (
+                f"{lang_instruction}"
                 "Read all text in this image exactly as it appears, character by character. "
                 "Output ONLY the text you see. "
                 "Do NOT autocomplete, guess, or add any text that is not visible. "
                 "Do NOT correct spelling or grammar. "
                 "If the image contains no text, output an empty string."
             )
+
 
         payload = {
             "model": "typhoon-ocr",

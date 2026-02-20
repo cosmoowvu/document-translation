@@ -104,6 +104,11 @@ def translate_batch_typhoon(
     # Typhoon Translate prompt - IMPROVED to force separate block output
     prompt = (
         f"Translate each block below from {lang_names.get(src_lang, src_lang)} into {target_name}.\n\n"
+        "TRANSLATION PHILOSOPHY:\n"
+        "- Understand the MEANING and INTENT of each sentence first, then express it naturally in the target language\n"
+        "- Produce fluent, idiomatic translations that sound native — NOT word-for-word literal translations\n"
+        "- Preserve the original tone (formal/informal) and emphasis\n"
+        "- Adapt expressions so they make sense naturally in the target language\n\n"
         "CRITICAL RULES:\n"
         f"1. You MUST output exactly {num_blocks} blocks with markers ###BLOCK1### to ###BLOCK{num_blocks}###\n"
         "2. Translate each block SEPARATELY - do NOT merge blocks together\n"
@@ -115,6 +120,7 @@ def translate_batch_typhoon(
         f"Input ({num_blocks} blocks):\n{combined_text}\n\n"
         f"Output ({num_blocks} blocks in {target_name}):"
     )
+
 
     
     print(f"   📤 Sending Batch Prompt (Typhoon - {len(texts)} blocks)...")

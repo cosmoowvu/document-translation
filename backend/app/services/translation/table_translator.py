@@ -14,6 +14,42 @@ from app.config import settings
 
 TABLE_CELLS_PER_BATCH = 6  # จำนวน cells สูงสุดต่อ batch
 
+# CJK target languages (used for leakage scope decisions)
+_CJK_LANGS = {"jpn_Jpan", "ja", "zho_Hans", "zho_Hant", "zh", "zh-cn", "kor_Hang", "ko"}
+
+
+def _get_source_leakage_scripts(src_lang: str, target_lang: str) -> list:
+    """
+    Return regex character ranges that should NOT appear in the translated output.
+    Based on the SOURCE language — we check if source chars leaked into the translation.
+    Returns empty list if no leakage check is needed (e.g. English source).
+    """
+    # Thai source: Sarabun/Thai chars shouldn't appear in output
+    if src_lang in {"tha_Thai", "th"}:
+        return [r'\u0e00-\u0e7f']
+
+    # Japanese source: Hiragana + Katakana are unique to Japanese (Kanji overlaps ZH, skip)
+    if src_lang in {"jpn_Jpan", "ja"}:
+        # If target is also Japanese → no check (translation is in Japanese)
+        if target_lang in {"jpn_Jpan", "ja"}:
+            return []
+        return [r'\u3040-\u309f', r'\u30a0-\u30ff']  # Hiragana + Katakana
+
+    # Korean source: Hangul is unique to Korean
+    if src_lang in {"kor_Hang", "ko"}:
+        if target_lang in {"kor_Hang", "ko"}:
+            return []
+        return [r'\uac00-\ud7af']
+
+    # Chinese source: CJK Unified chars — only check when target is non-CJK
+    if src_lang in {"zho_Hans", "zho_Hant", "zh", "zh-cn"}:
+        if target_lang in _CJK_LANGS:
+            return []  # CJK→CJK overlap too complex, handled by Qwen3 final pass
+        return [r'\u4e00-\u9fff']
+
+    # English / Latin source → no leakage concern
+    return []
+
 
 class HTMLTableParser(HTMLParser):
     """Parse HTML table and extract cell contents"""
@@ -114,43 +150,112 @@ class TableTranslator:
             
         print(f"   📊 Table Block (OCR Text): Translating {len(text)} chars -> HTML Table")
         
-        # Construct Prompt
-        # Force Typhoon to output HTML table
+        # 1. Try Typhoon First
         prompt = (
-            f"Translate the following text from {src_lang} to {target_lang}.\n"
-            "The input is a table structure (could be Markdown, CSV, or loose text).\n"
+            f"You are a professional translator. Translate the content of the following table from {src_lang} to {target_lang}.\n"
+            "The input is a table structure (Markdown, CSV, or spaces).\n"
             "CRITICAL RULES:\n"
-            "1. Output the result as a valid HTML `<table>` structure.\n"
-            "2. Preserve the rows and columns as best as possible.\n"
-            "3. Do NOT add any explanations or markdown code blocks (```html).\n"
-            "4. Output ONLY the HTML <table>...</table> code.\n\n"
+            "1. Output the result as a valid HTML `<table>` structure with `<tr>` and `<td>`.\n"
+            "2. TRANSLATE ALL TEXT content inside the cells significantly. Do NOT leave them in source language.\n"
+            "3. Analyze vertical and horizontal alignment to preserve rows/columns.\n"
+            "4. Output ONLY the HTML code. No markdown code blocks.\n\n"
             f"Input:\n{text}\n\n"
             "Output (HTML Table):"
         )
         
+        translated_html = ""
+        
         try:
-            # Call LLM directly (no batching for full table reconstruction)
-            # Use lower temperature for structure preservation
-            response = self.llm.generate(
-                prompt, 
-                temperature=0.1, 
-                max_tokens=2048
-            )
+            # Use slightly higher temp for better translation creativity (vs strict formatting)
+            translated_html = self.llm.generate(prompt, temperature=0.1, max_tokens=2048)
             
-            # Extract table if wrapped in markdown
-            match = re.search(r'<table>.*?</table>', response, re.DOTALL | re.IGNORECASE)
+            # Extract
+            match = re.search(r'<table>.*?</table>', translated_html, re.DOTALL | re.IGNORECASE)
             if match:
-                return match.group(0)
-            
-            # If no table tags found, but has <tr>...
-            if '<tr>' in response:
-                return f"<table>{response}</table>"
+                translated_html = match.group(0)
+            elif '<tr>' in translated_html:
+                translated_html = f"<table>{translated_html}</table>"
                 
-            return response # Fallback: return raw response (hope it's table-like)
-            
         except Exception as e:
-            print(f"      ⚠️ Failed to translate OCR table: {e}")
-            return text
+            print(f"      ⚠️ Typhoon Table Error: {e}")
+            translated_html = ""
+
+        # 2. Validation
+        is_valid = True
+        
+        # Check 1: Empty result
+        if not translated_html or len(translated_html) < 10:
+            is_valid = False
+            print("      ❌ Table Validation Failed: Empty result")
+            
+        # Check 2: CJK Target Presence (If target is JPN/ZH/KO, output MUST contain appropriate scripts)
+        # Use simple ranges
+        if is_valid and target_lang in _CJK_LANGS:
+            # Strip tags for check
+            clean_text = re.sub(r'<[^>]+>', '', translated_html)
+            
+            has_cjk = False
+            if target_lang in {"jpn_Jpan", "ja"}:
+                # Check Kana or Kanji
+                has_cjk = any('\u3040' <= c <= '\u30ff' or '\u4e00' <= c <= '\u9fff' for c in clean_text)
+            elif target_lang in {"zho_Hans", "zho_Hant", "zh", "zh-cn"}:
+                # Check Chinese
+                has_cjk = any('\u4e00' <= c <= '\u9fff' for c in clean_text)
+            elif target_lang in {"kor_Hang", "ko"}:
+                # Check Hangul
+                has_cjk = any('\uac00' <= c <= '\ud7af' for c in clean_text)
+            
+            if not has_cjk and len(clean_text) > 0:
+                is_valid = False
+                print(f"      ❌ Table Validation Failed: No {target_lang} characters found in output")
+
+        # 3. Fallback to Qwen if invalid
+        if not is_valid:
+            print("      🔄 Switching to Qwen for Table Translation...")
+            try:
+                from app.services.translation.model_manager import load_model, unload_model
+                from app.config import settings
+                from app.services.translation.qwen_translator import _generate_qwen
+                
+                # Unload Typhoon, Load Qwen
+                typhoon_model = "scb10x/typhoon-translate1.5-4b:latest"
+                qwen_model = settings.FALLBACK_MODEL
+                
+                unload_model(typhoon_model, settings.OLLAMA_URL)
+                load_model(qwen_model, settings.OLLAMA_URL)
+                
+                # Qwen Prompt (Qwen likes concise instructions)
+                qwen_prompt = (
+                    f"Translate this table from {src_lang} to {target_lang}. \n"
+                    "Output ONLY the HTML <table> structure. \n"
+                    "Ensure all cell contents are translated.\n\n"
+                    f"{text}"
+                )
+                
+                qwen_html = _generate_qwen(qwen_prompt, settings.OLLAMA_URL, qwen_model)
+                
+                # Extract
+                match = re.search(r'<table>.*?</table>', qwen_html, re.DOTALL | re.IGNORECASE)
+                if match:
+                    translated_html = match.group(0)
+                elif '<tr>' in qwen_html:
+                    translated_html = f"<table>{qwen_html}</table>"
+                else:
+                    translated_html = qwen_html # Best effort
+                
+                print("      ✅ Qwen Table Translation Completed")
+                
+                # Restore Typhoon
+                unload_model(qwen_model, settings.OLLAMA_URL)
+                preload_model(typhoon_model, settings.OLLAMA_URL)
+                
+            except Exception as e:
+                print(f"      ⚠️ Qwen Fallback Failed: {e}")
+                # Return original text or whatever we got
+                if not translated_html:
+                    return text
+        
+        return translated_html
 
     def _translate_table_cells(
         self,
@@ -224,15 +329,9 @@ class TableTranslator:
             chunk_results, failed_indices = self.llm.translate_batch_typhoon(chunk, target_lang, src_lang)
             print(f"      📝 Translated: {chunk_results}") # Debug
             
-            # Post-validation: Check for wrong language
-            forbidden_scripts = []
-            if target_lang == "zho_Hans" or target_lang == "zho_Hant":
-                forbidden_scripts = ['\u0e00-\u0e7f']  # Thai
-            elif target_lang == "jpn_Jpan":
-                forbidden_scripts = ['\u0e00-\u0e7f']  # Thai
-            elif target_lang == "kor_Hang":
-                forbidden_scripts = ['\u0e00-\u0e7f']  # Thai
-            
+            # Post-validation: Detect source language leakage in translated output
+            forbidden_scripts = _get_source_leakage_scripts(src_lang, target_lang)
+
             # Check each result for forbidden characters
             validated_results = []
             qwen_candidates_indices = [] # Indices within chunk that need Qwen retry
@@ -241,13 +340,32 @@ class TableTranslator:
                 # Check if Typhoon failed technically
                 is_failed = (idx in failed_indices)
                 
-                # Check validation (forbidden chars)
+                # Check validation (forbidden source chars)
                 if not is_failed and forbidden_scripts and translated:
                     for script_range in forbidden_scripts:
                         if re.search(f'[{script_range}]', translated):
-                            print(f"      ⚠️ Cell {i+idx+1}: Wrong language detected")
+                            print(f"      ⚠️ Cell {i+idx+1}: Source leakage detected")
                             is_failed = True
                             break
+                            
+                # [NEW] Check validation (target language presence for CJK)
+                # If target is CJK but result has NO CJK chars -> Failed (likely returned English)
+                if not is_failed and translated and target_lang in _CJK_LANGS:
+                    clean_text = re.sub(r'<[^>]+>', '', translated) # strip tags if any
+                    has_cjk = False
+                    if target_lang in {"jpn_Jpan", "ja"}:
+                         has_cjk = any('\u3040' <= c <= '\u30ff' or '\u4e00' <= c <= '\u9fff' for c in clean_text)
+                    elif target_lang in {"zho_Hans", "zho_Hant", "zh", "zh-cn"}:
+                         has_cjk = any('\u4e00' <= c <= '\u9fff' for c in clean_text)
+                    elif target_lang in {"kor_Hang", "ko"}:
+                         has_cjk = any('\uac00' <= c <= '\ud7af' for c in clean_text)
+                    
+                    if not has_cjk and len(clean_text.strip()) > 0:
+                         # Only fail if original was NOT empty/symbol-only
+                         # Check if original had meaningful text
+                         if any(c.isalnum() for c in original):
+                             print(f"      ⚠️ Cell {i+idx+1}: No CJK characters in output (Translation failed)")
+                             is_failed = True
                 
                 if is_failed:
                     qwen_candidates_indices.append(idx)
@@ -262,7 +380,7 @@ class TableTranslator:
                 try:
                     # Model config
                     typhoon_model = "scb10x/typhoon-translate1.5-4b:latest"
-                    qwen_model = "qwen2.5:3b"
+                    qwen_model = settings.FALLBACK_MODEL
                     
                     # Unload Typhoon / Load Qwen
                     unload_model(typhoon_model, settings.OLLAMA_URL)
@@ -360,7 +478,7 @@ class TableTranslator:
             try:
                 # Model config
                 typhoon_model = "scb10x/typhoon-translate1.5-4b:latest"
-                qwen_model = "qwen2.5:3b"
+                qwen_model = settings.FALLBACK_MODEL
                 
                 unload_model(typhoon_model, settings.OLLAMA_URL)
                 load_model(qwen_model, settings.OLLAMA_URL)
@@ -447,35 +565,85 @@ class TableTranslator:
             # Use Typhoon Direct (returns tuple: results, failed_indices)
             chunk_results, failed_indices = self.llm.translate_batch_typhoon(chunk, target_lang, src_lang)
             
-            # Post-validation: Check for wrong language
-            forbidden_scripts = []
-            if target_lang == "zho_Hans" or target_lang == "zho_Hant":
-                forbidden_scripts = ['\u0e00-\u0e7f']  # Thai
-            elif target_lang == "jpn_Jpan":
-                forbidden_scripts = ['\u0e00-\u0e7f']  # Thai
-            elif target_lang == "kor_Hang":
-                forbidden_scripts = ['\u0e00-\u0e7f']  # Thai
-            
+            # Post-validation: Detect source language leakage in translated output
+            forbidden_scripts = _get_source_leakage_scripts(src_lang, target_lang)
+
             # Validate each result
             validated_results = []
+            qwen_candidates_indices = []
+            
             for idx, (original_text, translated) in enumerate(zip(chunk, chunk_results)):
+                is_failed = (idx in failed_indices)
                 has_forbidden = False
-                if forbidden_scripts and translated:
+                
+                # Check validation (forbidden source chars)
+                if not is_failed and forbidden_scripts and translated:
                     for script_range in forbidden_scripts:
                         if re.search(f'[{script_range}]', translated):
                             has_forbidden = True
-                            print(f"      ⚠️ Cell {i+idx+1}: Wrong language detected, using original")
+                            print(f"      ⚠️ Cell {i+idx+1}: Source lang leakage detected ({src_lang})")
                             break
-                
-                if has_forbidden:
-                    validated_results.append(original_text)
+                            
+                # Check validation (target language presence for CJK)
+                if not is_failed and not has_forbidden and translated and target_lang in _CJK_LANGS:
+                    clean_text = re.sub(r'<[^>]+>', '', translated)
+                    has_cjk = False
+                    if target_lang in {"jpn_Jpan", "ja"}:
+                         has_cjk = any('\u3040' <= c <= '\u30ff' or '\u4e00' <= c <= '\u9fff' for c in clean_text)
+                    elif target_lang in {"zho_Hans", "zho_Hant", "zh", "zh-cn"}:
+                         has_cjk = any('\u4e00' <= c <= '\u9fff' for c in clean_text)
+                    elif target_lang in {"kor_Hang", "ko"}:
+                         has_cjk = any('\uac00' <= c <= '\ud7af' for c in clean_text)
+                    
+                    if not has_cjk and len(clean_text.strip()) > 0:
+                         if any(c.isalnum() for c in original_text):
+                             print(f"      ⚠️ Cell {i+idx+1}: No CJK characters in output")
+                             has_forbidden = True
+
+                if has_forbidden or is_failed:
+                    validated_results.append(original_text) # Placeholder
+                    qwen_candidates_indices.append(idx)
                 else:
                     validated_results.append(translated)
-            
-            # Log if any cells failed validation
-            if failed_indices:
-                print(f"      ⚠️ {len(failed_indices)} cells failed validation in this batch")
-            
+
+            # --- Fallback: Qwen for failed cells ---
+            if qwen_candidates_indices:
+                print(f"      🚨 {len(qwen_candidates_indices)} cells failed validation - Switching to Qwen...")
+                try:
+                    from app.services.translation.model_manager import load_model, unload_model
+                    from app.config import settings
+                    from app.services.translation.qwen_translator import translate_blocks_qwen
+                    
+                    # Unload Typhoon, Load Qwen
+                    typhoon_model = "scb10x/typhoon-translate1.5-4b:latest"
+                    qwen_model = settings.FALLBACK_MODEL
+                    
+                    unload_model(typhoon_model, settings.OLLAMA_URL)
+                    load_model(qwen_model, settings.OLLAMA_URL)
+                    
+                    # Prepare failed texts
+                    failed_texts = [chunk[idx] for idx in qwen_candidates_indices]
+                    
+                    # Translate
+                    qwen_results, _ = translate_blocks_qwen(
+                        failed_texts, target_lang, src_lang, settings.OLLAMA_URL, qwen_model
+                    )
+                    
+                    # Merge results
+                    for q_idx, original_idx in enumerate(qwen_candidates_indices):
+                        if qwen_results[q_idx]:
+                            validated_results[original_idx] = qwen_results[q_idx]
+                            print(f"      ✅ Cell {i+original_idx+1} recovered by Qwen")
+                        else:
+                            print(f"      ❌ Cell {i+original_idx+1} failed even with Qwen")
+                            
+                    # Restore Typhoon
+                    unload_model(qwen_model, settings.OLLAMA_URL)
+                    preload_model(typhoon_model, settings.OLLAMA_URL)
+                    
+                except Exception as e:
+                    print(f"      ⚠️ Qwen Fallback Failed: {e}")
+
             translated_texts.extend(validated_results)
         
         # รวมผลลัพธ์

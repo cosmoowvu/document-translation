@@ -3,6 +3,141 @@
 from app.services.translation import translation_service
 
 
+def _run_qwen3_final_pass(
+    doc_result: dict,
+    source_lang: str,
+    target_lang: str,
+    job_status: dict,
+    job_id: str,
+    ollama_url: str
+):
+    """
+    Final pass: scan ALL translated blocks for remaining source language leakage.
+    Covers two cases:
+      A) source is CJK → check if CJK chars still appear in (non-CJK target) output
+      B) target is CJK → check if source chars (non-English) still appear in CJK output
+    Blocks with >5% source leakage are re-translated with qwen3:1.7b.
+    After done: unload qwen3:1.7b and preload Typhoon.
+    """
+    from app.services.translation.qwen_translator import translate_blocks_qwen
+    from app.services.translation.model_manager import unload_model, preload_model, load_model
+
+    TYPHOON_MODEL = "scb10x/typhoon-translate1.5-4b:latest"
+    QWEN3_MODEL = "qwen3:1.7b"
+
+    CJK_LANGS = {"jpn_Jpan", "ja", "zho_Hans", "zho_Hant", "zh", "zh-cn", "kor_Hang", "ko"}
+
+    # Unicode character ranges for each language group
+    LANG_RANGES = {
+        "jpn_Jpan":  [('\u3040', '\u30ff'), ('\u4e00', '\u9fff')],  # Kana + Kanji
+        "ja":        [('\u3040', '\u30ff'), ('\u4e00', '\u9fff')],
+        "zho_Hans":  [('\u4e00', '\u9fff')],
+        "zho_Hant":  [('\u4e00', '\u9fff')],
+        "zh":        [('\u4e00', '\u9fff')],
+        "zh-cn":     [('\u4e00', '\u9fff')],
+        "kor_Hang":  [('\uac00', '\ud7af')],
+        "ko":        [('\uac00', '\ud7af')],
+        "tha_Thai":  [('\u0e00', '\u0e7f')],
+        "lao_Laoo":  [('\u0e80', '\u0eff')],
+        "khm_Khmr":  [('\u1780', '\u17ff')],
+        "mya_Mymr":  [('\u1000', '\u109f')],
+        "ara_Arab":  [('\u0600', '\u06ff')],
+    }
+    # English (Latin) is intentionally NOT in LANG_RANGES → allowed to pass through
+
+    def _get_leakage_ranges(lang: str):
+        """Return unicode ranges for the given language. Returns [] if English or unknown."""
+        return LANG_RANGES.get(lang, [])
+
+    def _has_source_leakage(text: str, lang_to_check: str) -> bool:
+        """Return True if >5% of text consists of `lang_to_check` characters."""
+        if not text:
+            return False
+        ranges = _get_leakage_ranges(lang_to_check)
+        if not ranges:
+            return False  # English or unknown → no leakage concern
+        # Strip HTML tags so <td>, <tr> etc. don't dilute the ratio
+        import re as _re
+        clean = _re.sub(r'<[^>]+>', '', text)
+        total = len(clean)
+        if total == 0:
+            return False
+        src_count = sum(1 for c in clean if any(s <= c <= e for s, e in ranges))
+        return (src_count / total) > 0.05
+
+    target_is_cjk = target_lang in CJK_LANGS
+    source_is_cjk = source_lang in CJK_LANGS
+
+    # Collect problem blocks across all pages
+    problem_blocks = []  # list of (page_key, block_idx, block, src_lang_for_block)
+    for page_key, page_data in doc_result.get("pages", {}).items():
+        for block_idx, block in enumerate(page_data.get("blocks", [])):
+            text = block.get("text", "")
+            detected_lang = block.get("detected_lang", source_lang)
+            if detected_lang in ("unknown", ""):
+                detected_lang = source_lang
+
+            has_leakage = False
+
+            if source_is_cjk or (source_lang == "auto" and detected_lang in CJK_LANGS):
+                # Case A: source was CJK → check if CJK still in output
+                check_lang = detected_lang if detected_lang in CJK_LANGS else source_lang
+                has_leakage = _has_source_leakage(text, check_lang)
+
+            if target_is_cjk and not has_leakage:
+                # Case B: target is CJK → check if source language (non-English) leaked
+                # Use detected_lang of the block as the "source to check for"
+                has_leakage = _has_source_leakage(text, detected_lang)
+
+            if has_leakage:
+                problem_blocks.append((page_key, block_idx, block, detected_lang))
+
+    if not problem_blocks:
+        print("   ✅ Qwen3 Final Pass: No leakage detected — all blocks clean!")
+        return
+
+    print(f"   🔍 Qwen3 Final Pass: {len(problem_blocks)} blocks still have source language leakage")
+
+    # Unload Typhoon, load Qwen3:1.7b
+    unload_model(TYPHOON_MODEL, ollama_url)
+    load_model(QWEN3_MODEL, ollama_url, keep_alive="5m")
+
+    try:
+        texts_to_fix = [b["text"] for _, _, b, _ in problem_blocks]
+
+        # Use most common source lang among problem blocks
+        from collections import Counter
+        src_lang_counter = Counter(lang for _, _, _, lang in problem_blocks)
+        src = src_lang_counter.most_common(1)[0][0]
+        if src in ("unknown", ""):
+            src = source_lang
+
+        fixed_texts, failed_indices = translate_blocks_qwen(
+            texts_to_fix,
+            target_lang,
+            src,
+            ollama_url,
+            model_name=QWEN3_MODEL,
+            job_status=job_status,
+            job_id=job_id
+        )
+
+        # Write results back to doc_result
+        for i, (page_key, block_idx, orig_block, _) in enumerate(problem_blocks):
+            if i not in failed_indices and fixed_texts[i]:
+                doc_result["pages"][page_key]["blocks"][block_idx]["text"] = fixed_texts[i]
+                doc_result["pages"][page_key]["blocks"][block_idx]["qwen3_fallback"] = True
+                print(f"      ✅ Fixed block {block_idx} on page {page_key}")
+            else:
+                print(f"      ❌ Block {block_idx} on page {page_key} still failed — keeping Typhoon result")
+
+    finally:
+        # Always cleanup: unload Qwen3, preload Typhoon for next job
+        unload_model(QWEN3_MODEL, ollama_url)
+        preload_model(TYPHOON_MODEL, ollama_url)
+        print("   🔄 Qwen3 unloaded, Typhoon preloaded")
+
+
 
 def process_translation(job_id: str, file_path: str, source_lang: str, target_lang: str, job_status: dict, translation_mode: str = "typhoon_direct", cache_key: str = None, ocr_engine: str = "typhoon", render_mode: str = "markdown"):
     """
@@ -187,7 +322,8 @@ def process_translation(job_id: str, file_path: str, source_lang: str, target_la
                         original=block.get("original_text", ""),
                         translated=block.get("text", ""),
                         detected_lang=block.get("detected_lang", "unknown"),
-                        was_translated=block.get("was_translated", True)
+                        was_translated=block.get("was_translated", True),
+                        qwen3_fallback=block.get("qwen3_fallback", False)
                     )
                 
                 # บันทึก log แต่ละตาราง
@@ -207,9 +343,53 @@ def process_translation(job_id: str, file_path: str, source_lang: str, target_la
             
         translate_duration = time.time() - translate_start
         logger.log_translation_complete(total_translated, total_skipped, translate_duration)
-        
+
+        # Step 2.5: Final Qwen3 Fallback Check (for CJK source OR target languages)
+        CJK_LANGS = {"jpn_Jpan", "ja", "zho_Hans", "zho_Hant", "zh", "zh-cn", "kor_Hang", "ko"}
+        should_run_final_pass = (
+            source_lang in CJK_LANGS or  # JP/ZH/KO as source → check output for remaining src chars
+            target_lang in CJK_LANGS or  # JP/ZH/KO as target → check for non-English source leakage
+            source_lang == "auto"         # Unknown source → might be CJK
+        )
+        if should_run_final_pass:
+            job_status[job_id]["progress"] = 82
+            job_status[job_id]["message"] = "ตรวจสอบคุณภาพการแปล..."
+            print("\n🔍 Step 2.5: Running Qwen3 Final Pass for CJK leakage...")
+            _run_qwen3_final_pass(
+                doc_result,
+                source_lang=source_lang,
+                target_lang=target_lang,
+                job_status=job_status,
+                job_id=job_id,
+                ollama_url=settings.OLLAMA_URL
+            )
+
+            # Re-log blocks that were fixed by Qwen3 (append correction section to each page log)
+            from app.config import settings as cfg
+            import os
+            for page_no in range(1, total_pages + 1):
+                page_key = page_no if page_no in doc_result["pages"] else str(page_no)
+                page_data = doc_result["pages"].get(page_key)
+                if not page_data:
+                    continue
+                qwen3_fixed = [
+                    (idx, block) for idx, block in enumerate(page_data.get("blocks", []))
+                    if block.get("qwen3_fallback", False)
+                ]
+                if qwen3_fixed:
+                    log_file = cfg.OUTPUT_DIR / job_id / "logs" / f"page_{page_no:03d}_blocks.txt"
+                    with open(log_file, "a", encoding="utf-8") as f:
+                        f.write(f"\n{'='*60}\n")
+                        f.write("QWEN3 CORRECTIONS\n")
+                        f.write(f"{'='*60}\n")
+                        for idx, block in qwen3_fixed:
+                            f.write(f"Block {idx + 1} [TRANSLATED] [QWEN3] (detected: {block.get('detected_lang', 'unknown')})\n")
+                            f.write(f"  Original: {block.get('original_text', '')}\n")
+                            f.write(f"  Result:   {block.get('text', '')}\n")
+                            f.write("-" * 60 + "\n")
+
         # Step 3: Render
-        job_status[job_id]["progress"] = 80
+        job_status[job_id]["progress"] = 90
         job_status[job_id]["message"] = "กำลังสร้างเอกสาร..."
         
         render_start = time.time()

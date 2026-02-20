@@ -127,3 +127,45 @@ def translate_blocks_qwen(
     
     # On failure, return original texts
     return texts, list(range(len(texts)))
+
+
+def _generate_qwen(
+    prompt: str,
+    ollama_url: str,
+    model_name: str,
+    temperature: float = 0.1
+) -> str:
+    """
+    Generate raw text from Qwen (helper for specific tasks like Table Translation)
+    """
+    if '/api/generate' not in ollama_url:
+        base_url = ollama_url.rstrip('/')
+        api_url = f"{base_url}/api/generate"
+    else:
+        api_url = ollama_url
+        
+    try:
+        resp = requests.post(
+            api_url,
+            json={
+                "model": model_name,
+                "prompt": prompt,
+                "stream": False,
+                "options": {
+                    "temperature": temperature,
+                    "num_predict": 4096,
+                    "top_p": 0.9
+                }
+            },
+            timeout=300
+        )
+        
+        if resp.status_code == 200:
+            return resp.json().get("response", "").strip()
+        else:
+            print(f"   ❌ Qwen API error: {resp.status_code} - {resp.text}")
+            return ""
+            
+    except Exception as e:
+        print(f"   ❌ Qwen request error: {e}")
+        return ""

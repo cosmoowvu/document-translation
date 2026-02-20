@@ -308,22 +308,21 @@ class OpenCVService:
         lines_heights = [b['h'] for b in line_boxes]
         median_h = np.median(lines_heights) if lines_heights else 20
         
-        max_gap = 0.75 * median_h  # Gap threshold: allow up to 1.5x line height between lines in same paragraph
+        max_gap = 0.6 * median_h  # Gap threshold: increased to 1.2x to bridge blobs within same paragraph
         
         for next_box in line_boxes[1:]:
             # Check vertical gap
             gap = next_box['y'] - current_block['y2']
             
-            # Check horizontal alignment (roughly overlap in X)
             # Vertical proximity check
             is_vertical_close = gap < max_gap
             
+            wider_w = max(current_block['w'], next_box['w'])
+            narrower_w = min(current_block['w'], next_box['w'])
+
             # --- Short Last Line Detection ---
             # A short last line of a paragraph is much narrower than the block above
             # AND its x-range is contained within the block's x-range.
-            # In this case, merge regardless of gap size.
-            wider_w = max(current_block['w'], next_box['w'])
-            narrower_w = min(current_block['w'], next_box['w'])
             is_short_last_line = (
                 narrower_w < wider_w * 0.6 and  # next line is < 60% width of current block
                 next_box['x'] >= current_block['x'] - 30 and  # starts within left boundary
@@ -338,7 +337,7 @@ class OpenCVService:
             
             # Height similarity check (Don't merge headers with body text)
             h_ratio = min(current_block['h'], next_box['h']) / max(current_block['h'], next_box['h'])
-            is_height_similar = h_ratio > 0.5
+            is_height_similar = h_ratio > 0.4  # Relaxed from 0.5 to handle blobs of different line counts
             
             should_merge = (
                 is_short_last_line or  # Short last line → always merge if contained
@@ -426,8 +425,8 @@ class OpenCVService:
 
             # Crop BBox (Padded for OCR)
             # Increased padding to prevent clipping tops/bottoms of characters
-            pad_x = 20
-            pad_y = 20
+            pad_x = 10
+            pad_y = 10
             
             cx1 = max(0, x1 - pad_x)
             cy1 = max(0, y1 - pad_y)

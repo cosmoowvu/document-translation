@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     # Ollama / Translation
     OLLAMA_URL: str = "http://localhost:11434"
     TRANSLATION_MODEL: str = "scb10x/typhoon-translate1.5-4b:latest"  # Typhoon Translation 1.5 (4B)
-    FALLBACK_MODEL: str = "qwen2.5:3b" # สำรองเมื่อ Typhoon ล้มเหลว (User selected 3b)
+    FALLBACK_MODEL: str = "qwen3:1.7b" # สำรองเมื่อ Typhoon ล้มเหลว
     BATCH_SIZE: int = 3  # จำนวน blocks ต่อ batch (ลดลงเพื่อให้ Qwen แม่นขึ้น)
     PRELOAD_MODELS: bool = True  # Set to True to preload model on startup
     
