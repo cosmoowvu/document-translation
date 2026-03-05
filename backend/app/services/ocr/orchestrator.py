@@ -51,6 +51,14 @@ class OCRService:
                 self._opencv = OpenCVService()
                 
             return self._opencv.process_document(file_path, source_lang, job_id=job_id, job_status=job_status)
+
+        elif ocr_engine == "paddle":
+            # ✅ Paddle Layout Mode (PicoDet + DBNet → block detection)
+            if not hasattr(self, '_paddle_layout') or self._paddle_layout is None:
+                from .paddle_layout_service import PaddleLayoutService
+                self._paddle_layout = PaddleLayoutService()
+
+            return self._paddle_layout.process_document(file_path, source_lang, job_id=job_id, job_status=job_status)
             
         else:
             # Default to OpenCV if unknown (or error)

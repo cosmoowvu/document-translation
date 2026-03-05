@@ -24,12 +24,12 @@ def run_ocr_pipeline(
     ocr_start = time.time()
     
     # Update status
-    job_status[job_id]["message"] = "กำลังวิเคราะห์ Layout (OpenCV)..."
+    job_status[job_id]["message"] = "กำลังวิเคราะห์ Layout (PaddleOCR)..."
     
     # ------------------------------------------------------------------
     # 1. Layout Analysis (OpenCV)
     # ------------------------------------------------------------------
-    print(f"📷 Running OpenCV Layout Analysis...")
+    print(f"🔷 Running PaddleOCR Layout Analysis...")
     
     # Force 'tha_Thai' if auto to ensure Thai OCR works
     effective_source_lang = "tha_Thai" if source_lang == "auto" else source_lang
@@ -38,12 +38,12 @@ def run_ocr_pipeline(
     layout_result = ocr_service.process_document(
         file_path, 
         source_lang=effective_source_lang, 
-        ocr_engine="opencv", 
+        ocr_engine="paddle", 
         job_id=job_id,
         job_status=job_status
     )
     
-    print(f"✅ OpenCV Layout Analysis complete. Blocks found: {sum(len(p['blocks']) for p in layout_result['pages'].values())}")
+    print(f"✅ PaddleOCR Layout Analysis complete. Blocks found: {sum(len(p['blocks']) for p in layout_result['pages'].values())}")
     
     # ------------------------------------------------------------------
     # 2. CROP & OCR PIPELINE (Typhoon Block-by-Block)
@@ -85,6 +85,65 @@ def run_ocr_pipeline(
         full_page_pix = pdf_page.get_pixmap(dpi=200)
         full_page_path = crop_dir / f"full_page_{page_num_key}.png"
         full_page_pix.save(str(full_page_path))
+        
+        # ── Debug: Draw detected blocks on page image and save to logs/ ──
+        try:
+            import cv2
+            
+            log_dir = settings.OUTPUT_DIR / job_id / "logs"
+            os.makedirs(log_dir, exist_ok=True)
+            
+            # Load the full page image we just saved
+            debug_img = cv2.imread(str(full_page_path))
+            if debug_img is not None:
+                page_w_pts  = page_data.get("width",  pdf_page.rect.width)
+                page_h_pts  = page_data.get("height", pdf_page.rect.height)
+                img_h_px, img_w_px = debug_img.shape[:2]
+                
+                # Scale factors: points → pixels (the image is at 200 DPI)
+                sx = img_w_px / page_w_pts
+                sy = img_h_px / page_h_pts
+                
+                # Color map per label  (BGR)
+                COLORS = {
+                    "text":  (50, 200, 50),    # green
+                    "table": (0, 220, 220),    # yellow-ish
+                    "image": (220, 100, 0),    # blue-ish
+                }
+                
+                for idx, blk in enumerate(blocks):
+                    bbox  = blk.get("bbox", {})
+                    label = blk.get("label", "text")
+                    conf  = blk.get("confidence", 1.0)
+                    color = COLORS.get(label, (180, 180, 180))
+                    
+                    x1 = int(bbox.get("x1", 0) * sx)
+                    y1 = int(bbox.get("y1", 0) * sy)
+                    x2 = int(bbox.get("x2", 0) * sx)
+                    y2 = int(bbox.get("y2", 0) * sy)
+                    
+                    # Draw filled semi-transparent rectangle
+                    overlay = debug_img.copy()
+                    cv2.rectangle(overlay, (x1, y1), (x2, y2), color, -1)
+                    cv2.addWeighted(overlay, 0.15, debug_img, 0.85, 0, debug_img)
+                    
+                    # Draw border
+                    cv2.rectangle(debug_img, (x1, y1), (x2, y2), color, 2)
+                    
+                    # Label text
+                    tag = f"#{idx+1} {label} {conf:.2f}"
+                    font_scale = max(0.4, img_w_px / 2500)
+                    (tw, th), _ = cv2.getTextSize(tag, cv2.FONT_HERSHEY_SIMPLEX, font_scale, 1)
+                    ty = max(y1 - 4, th + 2)
+                    cv2.rectangle(debug_img, (x1, ty - th - 2), (x1 + tw + 4, ty + 2), color, -1)
+                    cv2.putText(debug_img, tag, (x1 + 2, ty), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 0, 0), 1, cv2.LINE_AA)
+                
+                debug_path = log_dir / f"page_{int(page_num_key):03d}_blocks_detected.png"
+                cv2.imwrite(str(debug_path), debug_img)
+                print(f"   🔍 Debug image saved: {debug_path.name}")
+        except Exception as _dbg_err:
+            print(f"   ⚠️ Debug image generation failed: {_dbg_err}")
+        # ─────────────────────────────────────────────────────────────────
         
         if page_num_key not in doc_result["pages"]:
              doc_result["pages"][page_num_key] = {}
@@ -155,7 +214,7 @@ def run_ocr_pipeline(
     logger.log_ocr_complete(doc_result["num_pages"], total_blocks, ocr_duration)
     
     # Update OCR engine for stats
-    resolved_ocr = "typhoon (opencv)"
+    resolved_ocr = "typhoon (paddle)"
     logger.log_ocr_engine(resolved_ocr)
     
     return doc_result
@@ -201,31 +260,37 @@ def process_single_block(i, block, pdf_page, page_num_key, crop_dir, job_id, job
         crop_path = crop_dir / crop_filename
         crop_pix.save(str(crop_path))
         
-        # Check if empty/solid
-        with Image.open(crop_path) as img_check:
-            img_gray = img_check.convert("L")
-            pixels = list(img_gray.getdata())
-            if not pixels: return False
+        # Check if empty/solid (skip for table — always OCR tables)
+        if block.get("label") != "table":
+            with Image.open(crop_path) as img_check:
+                img_gray = img_check.convert("L")
+                pixels = list(img_gray.getdata())
+                if not pixels: return False
+                    
+                avg = sum(pixels) / len(pixels)
+                var = sum((x - avg) ** 2 for x in pixels) / len(pixels)
+                import math
+                std_dev = math.sqrt(var)
                 
-            avg = sum(pixels) / len(pixels)
-            var = sum((x - avg) ** 2 for x in pixels) / len(pixels)
-            import math
-            std_dev = math.sqrt(var)
-            
-            if std_dev < 10.0 and block.get("label") != "table":
-                block["text"] = "" 
-                return False
+                # Truly blank / solid-color block — skip entirely
+                if std_dev < 5.0:
+                    block["text"] = ""
+                    return False
                 
     except Exception as resize_err:
         print(f"      ⚠️ Error processing block {i}: {resize_err}")
         return False
     
-    # OCR Request with Retry
-    is_table = block.get("label") == "table"
+    # ── OCR Request with Retry ─────────────────────────────────────────────
+    is_table   = block.get("label") == "table"
+    is_image   = block.get("label") == "image"
+
     if is_table:
         print(f"      📊 Processing Table Block {i+1}...")
+    elif is_image:
+        print(f"      🔍 Processing Image Block {i+1} (OCR to detect if table)...")
 
-    for attempt in range(4): # Initial + 3 Retries
+    for attempt in range(4):  # Initial + 3 Retries
         if job_status.get(job_id, {}).get("cancelled", False):
             return False
 
@@ -234,24 +299,53 @@ def process_single_block(i, block, pdf_page, page_num_key, crop_dir, job_id, job
             if ocr_service._typhoon is None:
                 from app.services.ocr.typhoon_service import TyphoonOCRService
                 ocr_service._typhoon = TyphoonOCRService()
-                
-            # Use direct VLM call with strict OCR prompt (prevents hallucination)
+
+            # Use direct VLM call with strict OCR prompt
             extracted_text = ocr_service._typhoon.process_image_direct(
                 str(crop_path),
                 source_lang=source_lang,
-                is_table=is_table
+                is_table=is_table or is_image,  # hint: might be a table
             )
 
-            block["text"] = extracted_text.strip()
-            block["original_text"] = extracted_text.strip()
+            text = extracted_text.strip()
+
+            # ── Smart routing for image blocks ───────────────────────────
+            if is_image:
+                import re as _re
+                has_table_html = bool(_re.search(
+                    r"<table[\s>]", text, _re.IGNORECASE
+                ))
+                if has_table_html:
+                    # OCR says it's a table → let table renderer handle it
+                    print(f"      📊 Image block {i+1} promoted to table by OCR")
+                    block["label"] = "table"
+                    block["text"]  = text
+                    block["original_text"] = text
+                else:
+                    # Plain text or empty → keep original image
+                    print(f"      🖼️ Image block {i+1}: no table found, using original image")
+                    block["text"]       = ""
+                    block["image_path"] = str(crop_path)
+                    block["is_image"]   = True
+            # ─────────────────────────────────────────────────────────────
+            else:
+                block["text"] = text
+                block["original_text"] = text
+
             return True
-            
+
         except Exception as e:
             if attempt == 3:
-                block["text"] = ""
-                return True 
-            
+                # Final failure: for image blocks, fall back to original image
+                if is_image:
+                    block["text"]       = ""
+                    block["image_path"] = str(crop_path)
+                    block["is_image"]   = True
+                else:
+                    block["text"] = ""
+                return True
+
             wait_time = 5 + (attempt * 3)
             time.sleep(wait_time)
-            
+
     return False

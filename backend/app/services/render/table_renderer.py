@@ -4,8 +4,66 @@ from typing import Dict, Any, List
 from PIL import ImageDraw
 from app.services.text_processor import cleanup_llm_explanations
 
+
+def _normalize_table_html(html: str) -> str:
+    """Fix common malformed <td> patterns from Typhoon OCR."""
+    def _fix_tag(m):
+        tag  = m.group(1)
+        rest = m.group(2)
+        if re.match(r'^[\w-]+[\s=>]', rest):
+            return f"<{tag} {rest}"
+        return f"<{tag}>{rest}"
+
+    html = re.sub(r'<(t[dh])\s+([^>]*)', _fix_tag, html)
+    html = re.sub(r'<(tr)\s+([^>]*?)(?=<t[dh])', lambda m: '<tr>', html)
+    return html
+
+
+def markdown_table_to_html(text: str) -> str:
+    """
+    Convert markdown pipe-table to HTML table.
+    Input:  | Col1 | Col2 |\\n|---|---|\\n| A | B |
+    Output: <table><tr><th>Col1</th><th>Col2</th></tr>...
+    Only converts when a clear pipe-table pattern is detected.
+    Returns original text if not a markdown table.
+    """
+    lines = [l.strip() for l in text.strip().splitlines()]
+    # Need at least 3 lines: header, separator, data
+    if len(lines) < 2:
+        return text
+
+    # Check if it looks like a markdown table (lines with | )
+    pipe_lines = [l for l in lines if l.startswith('|') and l.endswith('|')]
+    if len(pipe_lines) < 2:
+        return text
+
+    html_rows = []
+    is_first = True
+    for line in lines:
+        if not line.startswith('|'):
+            continue
+        # Skip separator line (|----|-----|)
+        if re.match(r'^[\|\-\:\s]+$', line):
+            is_first = False
+            continue
+        # Parse cells
+        cells = [c.strip() for c in line.strip('|').split('|')]
+        tag = 'th' if is_first else 'td'
+        row_html = ''.join(f"<{tag}>{c}</{tag}>" for c in cells)
+        html_rows.append(f"<tr>{row_html}</tr>")
+        is_first = False
+
+    if not html_rows:
+        return text
+
+    return f"<table>{''.join(html_rows)}</table>"
+
+
 def parse_html_table(html_text: str) -> Dict:
     """Parse HTML table string into structured dict"""
+    # Step 0: Normalize malformed tags first
+    html_text = _normalize_table_html(html_text)
+
     # Cleanup: Remove newlines INSIDE tags
     html_text = re.sub(r'>\s+<', '><', html_text)
     html_text = html_text.replace('\r\n', ' ').replace('\n', ' ')
@@ -21,7 +79,7 @@ def parse_html_table(html_text: str) -> Dict:
     
     for r_idx, row_html in enumerate(rows):
         # Find cells (td or th)
-        cols = re.findall(r'<t[dh].*?>(.*?)</t[dh]>', row_html, re.DOTALL | re.IGNORECASE)
+        cols = re.findall(r'<t[dh][^>]*>(.*?)</t[dh]>', row_html, re.DOTALL | re.IGNORECASE)
         max_cols = max(max_cols, len(cols))
         
         for c_idx, cell_content in enumerate(cols):
@@ -37,7 +95,8 @@ def parse_html_table(html_text: str) -> Dict:
     return {
         "num_rows": len(rows),
         "num_cols": max_cols,
-        "cells": cells_data
+        "cells": cells_data,
+        "bbox": {}
     }
 
 def draw_table(draw: ImageDraw.ImageDraw, table: Dict, scale: float, font_service: Any, font_multiplier: float = 1.0) -> int:

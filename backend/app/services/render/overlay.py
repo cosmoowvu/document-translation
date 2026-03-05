@@ -4,7 +4,7 @@ import re
 from typing import Dict, Any
 from PIL import Image, ImageDraw, ImageStat
 from app.services.text_processor import cleanup_llm_explanations, normalize_punctuation
-from app.services.render.table_renderer import parse_html_table, draw_table
+from app.services.render.table_renderer import parse_html_table, draw_table, markdown_table_to_html
 
 def render_page_overlay(page_data: Dict, page_no: int, dpi: int, font_service: Any) -> Image.Image:
     """Render single page with Overlay (Inpaint + Text)"""
@@ -31,9 +31,12 @@ def render_page_overlay(page_data: Dict, page_no: int, dpi: int, font_service: A
 
     draw = ImageDraw.Draw(canvas)
     
-    # Pre-pass: "Inpaint" (Erase) original text areas
+    # Pre-pass: "Inpaint" (Erase) original text areas — skip image blocks
     if image_path and os.path.exists(image_path):
         for block in page_data.get("blocks", []):
+            # Skip image blocks — keep original pixels
+            if block.get("is_image"):
+                continue
             # [SAFETY] If block has no text (e.g. graphic that failed OCR), DO NOT ERASE IT.
             if not block.get("text", "").strip():
                 continue
@@ -46,16 +49,11 @@ def render_page_overlay(page_data: Dict, page_no: int, dpi: int, font_service: A
             x2 = min(width, int(bbox["x2"] * scale) + padding)
             y2 = min(height, int(bbox["y2"] * scale) + padding)
             
-            # Draw filled rectangle to "erase" original text
             # [SMART INPAINT] Use median color of the area to fill
             try:
-                # Crop the area from original canvas
                 crop = canvas.crop((x1, y1, x2, y2))
                 stat = ImageStat.Stat(crop)
-                # Use median color (usually background)
                 median_bg = tuple(map(int, stat.median))
-                
-                # Fill with median color
                 draw.rectangle([x1, y1, x2, y2], fill=median_bg)
             except Exception as e:
                 print(f"      ⚠️ Inpaint failed for block, using white: {e}")
@@ -70,7 +68,22 @@ def render_page_overlay(page_data: Dict, page_no: int, dpi: int, font_service: A
     
     # Render text blocks
     rendered_count = 0
+    all_blocks_scaled = []
+    for b in page_data["blocks"]:
+        bb = b["bbox"]
+        all_blocks_scaled.append({
+            "x1": int(bb["x1"] * scale),
+            "y1": int(bb["y1"] * scale),
+            "x2": int(bb["x2"] * scale),
+            "y2": int(bb["y2"] * scale),
+            "label": b.get("label", "text"),
+        })
+
     for idx, block in enumerate(page_data["blocks"]):
+        # IMAGE BLOCK: skip text rendering entirely
+        if block.get("is_image"):
+            continue
+
         text = block["text"]
         
         # Cleanup
@@ -84,10 +97,24 @@ def render_page_overlay(page_data: Dict, page_no: int, dpi: int, font_service: A
         x2 = int(bbox["x2"] * scale)
         y2 = int(bbox["y2"] * scale)
         
-        box_width = x2 - x1
         box_height = y2 - y1
-        
-        print(f"   📝 Block {idx+1}: bbox=({x1},{y1})-({x2},{y2}) size={box_width}x{box_height} text={text[:50]}...")
+
+        # ── Expand right edge symmetrically ─────────────────────────────
+        left_margin = x1   # distance from page left = our margin unit
+        right_limit = width - left_margin  # symmetric margin on the right
+        for ob in all_blocks_scaled:
+            if ob["x1"] <= x1:  # only blocks to the right
+                continue
+            v_overlap = min(y2, ob["y2"]) - max(y1, ob["y1"])
+            if v_overlap > box_height * 0.3:  # same horizontal band
+                right_limit = min(right_limit, ob["x1"] - 4)
+        box_width = max(x2 - x1, right_limit - x1)
+        # ─────────────────────────────────────────────────────────────────
+
+        # Convert markdown table → HTML before checking for <table>
+        text = markdown_table_to_html(text)
+
+        print(f"   📝 Block {idx+1}: bbox=({x1},{y1})-({x2},{y2}) box_width={box_width} text={text[:50]}...")
 
         # Check if block contains HTML table
         full_match = re.search(r'(.*?)(<table.*?>.*?</table>)(.*)', text, re.IGNORECASE | re.DOTALL)
@@ -164,6 +191,27 @@ def render_page_overlay(page_data: Dict, page_no: int, dpi: int, font_service: A
     
     print(f"   ✅ Rendered {rendered_count} text blocks")
     
+    # ── Paste image blocks at their original positions ───────────────────
+    for idx, block in enumerate(page_data.get("blocks", [])):
+        if not block.get("is_image"):
+            continue
+        img_path = block.get("image_path", "")
+        if not img_path or not os.path.exists(img_path):
+            continue
+        bbox = block["bbox"]
+        x1 = int(bbox["x1"] * scale)
+        y1 = int(bbox["y1"] * scale)
+        x2 = int(bbox["x2"] * scale)
+        y2 = int(bbox["y2"] * scale)
+        try:
+            img_block = Image.open(img_path).convert("RGBA")
+            img_block = img_block.resize((x2 - x1, y2 - y1), Image.Resampling.LANCZOS)
+            canvas.paste(img_block, (x1, y1), img_block)
+            print(f"   🖼️ Pasted image block {idx+1} at ({x1},{y1})-({x2},{y2})")
+        except Exception as _ie:
+            print(f"   ⚠️ Failed to paste image block {idx+1}: {_ie}")
+    # ─────────────────────────────────────────────────────────────────────
+
     # Render tables (legacy structured tables from OCR result, if any)
     tables = page_data.get("tables", [])
     for table in tables:
