@@ -56,9 +56,10 @@ def translate_blocks_qwen(
         f"Translate each block from {lang_names.get(src_lang, src_lang)} to {target_name}.\n\n"
         "RULES:\n"
         f"1. Output exactly {num_blocks} blocks with markers ###BLOCK1### to ###BLOCK{num_blocks}###\n"
-        "2. Translate EVERYTHING to target language (včetně proper names)\n"
-        "3. Preserve ONLY acronyms (2-6 uppercase letters like EOQ, PhD)\n"
-        "4. Output only translations, no explanations\n\n"
+        "2. Translate EVERYTHING to target language (including proper names)\n"
+        "3. Translate ALL text naturally, transcribing proper names phonetically where needed.\n"
+        "4. Output ONLY the translations, no explanations\n"
+        "5. Stop translating exactly where the original text ends. Do not add any sentences.\n\n"
         f"Input:\n{combined_text}\n\n"
         f"Output ({num_blocks} blocks in {target_name}):"
     )

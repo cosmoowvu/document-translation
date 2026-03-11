@@ -187,6 +187,12 @@ def cleanup_llm_explanations(text: str) -> str:
     text = re.sub(r'Let me know.*$', '', text, flags=re.DOTALL | re.IGNORECASE)
     text = re.sub(r'\*\*[A-Za-z\s:]+\*\*.*$', '', text, flags=re.DOTALL)
     
+    # Catch translation meta-commentary hallucination
+    text = re.sub(r'(The translation is not a word-for-word.*)$', '', text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r'(The response does not include.*)$', '', text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r'(Translation note:.*)$', '', text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r'(This response does not contain.*)$', '', text, flags=re.DOTALL | re.IGNORECASE)
+    
     # Remove common LLM prefixes
     text = re.sub(r'^(Translation:|Output:|Result:)\s*', '', text, flags=re.MULTILINE | re.IGNORECASE)
     

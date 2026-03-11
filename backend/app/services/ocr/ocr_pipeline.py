@@ -1,5 +1,6 @@
 import time
 import os
+import re
 import fitz
 from PIL import Image
 from typing import Dict, Any, List
@@ -45,6 +46,15 @@ def run_ocr_pipeline(
     
     print(f"✅ PaddleOCR Layout Analysis complete. Blocks found: {sum(len(p['blocks']) for p in layout_result['pages'].values())}")
     
+    # [NEW] Merge overlapping blocks to ensure no X/Y coordinate overlap (especially Thai vowels)
+    from app.utils.bbox_utils import merge_overlapping_blocks
+    total_before = sum(len(p['blocks']) for p in layout_result['pages'].values())
+    for page_key, page_data in layout_result["pages"].items():
+        page_data["blocks"] = merge_overlapping_blocks(page_data["blocks"])
+    total_after = sum(len(p['blocks']) for p in layout_result['pages'].values())
+    if total_before != total_after:
+        print(f"   🧹 Overlap merging reduced blocks from {total_before} to {total_after}")
+
     # ------------------------------------------------------------------
     # 2. CROP & OCR PIPELINE (Typhoon Block-by-Block)
     # ------------------------------------------------------------------
@@ -281,14 +291,22 @@ def process_single_block(i, block, pdf_page, page_num_key, crop_dir, job_id, job
         print(f"      ⚠️ Error processing block {i}: {resize_err}")
         return False
     
-    # ── OCR Request with Retry ─────────────────────────────────────────────
+    # ── Handle Image Blocks Directly ───────────────────────────────────────
     is_table   = block.get("label") == "table"
     is_image   = block.get("label") == "image"
 
+    if is_image:
+        print(f"      🖼️ Keeping Image Block {i+1} unchanged")
+        block["text"]       = ""
+        block["image_path"] = str(crop_path)
+        block["is_image"]   = True
+        return True
+
+    # ── OCR Request with Retry ─────────────────────────────────────────────
     if is_table:
         print(f"      📊 Processing Table Block {i+1}...")
-    elif is_image:
-        print(f"      🔍 Processing Image Block {i+1} (OCR to detect if table)...")
+    else:
+        print(f"      📝 Processing Text Block {i+1}...")
 
     for attempt in range(4):  # Initial + 3 Retries
         if job_status.get(job_id, {}).get("cancelled", False):
@@ -304,45 +322,34 @@ def process_single_block(i, block, pdf_page, page_num_key, crop_dir, job_id, job
             extracted_text = ocr_service._typhoon.process_image_direct(
                 str(crop_path),
                 source_lang=source_lang,
-                is_table=is_table or is_image,  # hint: might be a table
+                is_table=is_table,
             )
 
             text = extracted_text.strip()
-
-            # ── Smart routing for image blocks ───────────────────────────
-            if is_image:
-                import re as _re
-                has_table_html = bool(_re.search(
-                    r"<table[\s>]", text, _re.IGNORECASE
-                ))
-                if has_table_html:
-                    # OCR says it's a table → let table renderer handle it
-                    print(f"      📊 Image block {i+1} promoted to table by OCR")
-                    block["label"] = "table"
-                    block["text"]  = text
-                    block["original_text"] = text
-                else:
-                    # Plain text or empty → keep original image
-                    print(f"      🖼️ Image block {i+1}: no table found, using original image")
-                    block["text"]       = ""
+            
+            # [NEW] Post-OCR Hallucination Check
+            # Prevent pure image blocks (illustrations) from generating repeating OCR garbage
+            repeat_match = re.search(r'(.{3,})\1{4,}', text)
+            if repeat_match:
+                print(f"      🚨 OCR Hallucination detected (loop): '{repeat_match.group(1)}'...")
+                if len(text) > 150: # Likely an illustration forced to be read as text
+                    print(f"      🖼️ Converting hallucinated region to Image Block")
+                    block["text"] = ""
+                    block["original_text"] = ""
                     block["image_path"] = str(crop_path)
-                    block["is_image"]   = True
-            # ─────────────────────────────────────────────────────────────
-            else:
-                block["text"] = text
-                block["original_text"] = text
+                    block["is_image"] = True
+                    return True
+                else:
+                    text = text[:repeat_match.start()].strip() # Cut the loop
+
+            block["text"] = text
+            block["original_text"] = text
 
             return True
 
         except Exception as e:
             if attempt == 3:
-                # Final failure: for image blocks, fall back to original image
-                if is_image:
-                    block["text"]       = ""
-                    block["image_path"] = str(crop_path)
-                    block["is_image"]   = True
-                else:
-                    block["text"] = ""
+                block["text"] = ""
                 return True
 
             wait_time = 5 + (attempt * 3)

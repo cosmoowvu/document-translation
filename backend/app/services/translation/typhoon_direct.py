@@ -93,29 +93,30 @@ def translate_batch_typhoon(
             "Output:\n###BLOCK1### 안녕하세요\n\n"
         )
     elif "jpn" in target_lang.lower() or "japanese" in target_name.lower():
-        extra_instruction = "5. For Japanese, you MUST use Japanese script (Hiragana/Katakana/Kanji, e.g., こんにちは、テーブル、表). Do NOT use other languages.\n"
+        extra_instruction = (
+            "5. For Japanese, you MUST use ONLY natural Japanese script (Hiragana/Katakana/Kanji).\n"
+            "   - DO NOT output large spaced out letters or symbols (e.g., 卜 Ｐ Ｉ や ロ ロ ク...).\n"
+            "   - Sentences must flow naturally without random spaces separating every character.\n"
+        )
         # One-shot example for Japanese
         example_section = (
             "Example:\n"
             "Input:\n###BLOCK1### The table shows data\n"
-            "Output:\n###BLOCK1### 表はデータを示しています\n\n"
+            "Output:\n###BLOCK1### 表はデータを示しています。\n\n"
         )
 
-    # Typhoon Translate prompt - IMPROVED to force separate block output
+    # Typhoon Translate prompt
     prompt = (
-        f"Translate each block below from {lang_names.get(src_lang, src_lang)} into {target_name}.\n\n"
-        "TRANSLATION PHILOSOPHY:\n"
-        "- Understand the MEANING and INTENT of each sentence first, then express it naturally in the target language\n"
-        "- Produce fluent, idiomatic translations that sound native — NOT word-for-word literal translations\n"
-        "- Preserve the original tone (formal/informal) and emphasis\n"
-        "- Adapt expressions so they make sense naturally in the target language\n\n"
+        f"Translate each block below from {lang_names.get(src_lang, src_lang)} into {target_name}.\n"
+        "Produce fluent, natural translations that preserve the original meaning and tone.\n\n"
         "CRITICAL RULES:\n"
         f"1. You MUST output exactly {num_blocks} blocks with markers ###BLOCK1### to ###BLOCK{num_blocks}###\n"
         "2. Translate each block SEPARATELY - do NOT merge blocks together\n"
         "3. Each block's translation must appear after its ###BLOCKn### marker\n"
-        "4. Output ONLY the translations, no explanations\n"
+        "4. Output ONLY the translated text. NO notes, NO explanations, NO commentary, NO self-evaluation.\n"
+        "   - Stop immediately after the last translated word. Do not write anything else.\n"
         f"{extra_instruction}"
-        f"6. Translate ALL text into {target_name}, including proper names (e.g., 'Hua' → transcribe phonetically). Preserve ONLY acronyms (2-6 uppercase letters like EOQ, JELS, PhD).\n\n"
+        "6. Translate ALL text naturally, transcribing proper names phonetically where needed.\n\n"
         f"{example_section}"
         f"Input ({num_blocks} blocks):\n{combined_text}\n\n"
         f"Output ({num_blocks} blocks in {target_name}):"
@@ -141,8 +142,8 @@ def translate_batch_typhoon(
                     "prompt": prompt,
                     "stream": False,
                     "options": {
-                        "temperature": 0.2,  # Lowered further for strictness
-                        "repeat_penalty": 1.15, # Standard penalty (1.35 was too aggressive for Japanese)
+                        "temperature": 0.4,  # Increased slightly to avoid repetitive loops
+                        "repeat_penalty": 1.25, # Increased penalty to discourage repetition
                         "num_predict": 4096,  
                         "top_p": 0.9          
                     }
@@ -172,9 +173,18 @@ def translate_batch_typhoon(
                     match = re.search(rf"###BLOCK{i+1}###\s*(.*?)(?=\s*###BLOCK{i+2}###|$)", cleaned_response, re.DOTALL)
                     if match:
                         block_content = match.group(1).strip()
-                        block_content = re.sub(r'^(Here is the translation:|Translation:|Output:)\s*', '', block_content, flags=re.IGNORECASE)
+                        # Strip common LLM prefixes
+                        block_content = re.sub(r'^(Here is the translation:|Translation:|Output:|Translated text:)\s*', '', block_content, flags=re.IGNORECASE)
                         block_content = re.sub(r'^\*+|\*+$', '', block_content)
-                        block_content = block_content.strip()
+                        
+                        # [NEW] Strip trailing NOTE/COMMENTARY that the model adds after the translation
+                        # Catches:
+                        #   "Note: ...", "The translation adheres...", "This is a...", etc.
+                        #   Also catches bullet-list self-evaluation the model sometimes echoes from the prompt
+                        block_content = re.sub(
+                            r'\s*\n+\s*(?:[-*]\s+|)(Note[:\s]|Translation(?:\s+[Nn]ote)?[:\s]|The translation|In (this|the) (context|story|text)|This is a |If you |For (educational|context)|Survival |Building|Such |Without |Free-|For real|Regard|The Thai|Meaning and intent|The output is|Tone \(|No extra|Translat(?:ion|or) note)[\s\S]*$',
+                            '', block_content, flags=re.IGNORECASE
+                        ).strip()
 
                         # [NEW] Aggressive Hallucination Check for Repetitive Patterns
                         # Detect "เก้าเก้าเก้า..." or "aaaaa..."

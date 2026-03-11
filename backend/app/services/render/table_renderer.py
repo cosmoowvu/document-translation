@@ -135,7 +135,19 @@ def draw_table(draw: ImageDraw.ImageDraw, table: Dict, scale: float, font_servic
         cx = x1 + (col * cell_width)
         draw.line([(cx, y1), (cx, y2)], fill=line_color, width=1)
     
-    # Draw cell text
+    # First pass: determine uniform font size for the entire table
+    # Base it on the dimension of the table, not hardcoded small values
+    # cell_height is the height of a single row. A good max font size is roughly half the cell height, capped.
+    dynamic_max_font = min(int(cell_height * 0.6), int(40 * font_multiplier)) 
+    dynamic_max_font = max(dynamic_max_font, int(16 * font_multiplier)) # Ensure at least 16
+    
+    max_font_allowed = dynamic_max_font
+    min_font_allowed = int(10 * font_multiplier)
+    
+    table_font_size = max_font_allowed
+    
+    valid_cells = []
+    
     for cell in cells:
         row = cell.get("row", 0)
         col = cell.get("col", 0)
@@ -153,15 +165,18 @@ def draw_table(draw: ImageDraw.ImageDraw, table: Dict, scale: float, font_servic
         
         if available_width < 10 or available_height < 10:
             continue
+            
+        valid_cells.append({
+            "text": text,
+            "cx": cx,
+            "cy": cy,
+            "available_width": available_width,
+            "available_height": available_height
+        })
         
-        max_font = int(14 * font_multiplier)
-        min_font = int(8 * font_multiplier)
-        
-        # Simple font fitting
-        font = font_service.get_font(min_font, text=text)
-        
-        # Try to find best fit
-        for font_size in range(max_font, min_font - 1, -1):
+        # Find best font for THIS cell
+        best_size = min_font_allowed
+        for font_size in range(max_font_allowed, min_font_allowed - 1, -1):
             font = font_service.get_font(font_size, text=text)
             wrapped_lines = font_service.wrap_text(text, font, available_width, draw)
             
@@ -169,17 +184,37 @@ def draw_table(draw: ImageDraw.ImageDraw, table: Dict, scale: float, font_servic
             for line in wrapped_lines:
                 line_bbox = draw.textbbox((0, 0), line, font=font)
                 total_height += (line_bbox[3] - line_bbox[1]) + 2
-            
+                
             if total_height <= available_height:
+                best_size = font_size
                 break
+                
+        table_font_size = min(table_font_size, best_size)
+
+    # Second pass: Draw all cells with the uniform font size
+    font = font_service.get_font(table_font_size)
+    
+    for cell in valid_cells:
+        text = cell["text"]
+        cx = cell["cx"]
+        cy = cell["cy"]
+        available_width = cell["available_width"]
+        available_height = cell["available_height"]
+        
+        # Re-wrap text with the chosen uniform font
+        # If font_service.get_font requires text to detect script for fallback fonts:
+        cell_font = font_service.get_font(table_font_size, text=text)
+        wrapped_lines = font_service.wrap_text(text, cell_font, available_width, draw)
         
         current_y = cy
         for line in wrapped_lines:
-            line_bbox = draw.textbbox((0, 0), line, font=font)
+            line_bbox = draw.textbbox((0, 0), line, font=cell_font)
             line_height = line_bbox[3] - line_bbox[1]
             
-            if current_y + line_height <= cy + available_height:
-                draw.text((cx, current_y), line, fill="black", font=font)
+            # Draw regardless of height to guarantee it renders, we already constrained the baseline font size
+            # But cap at available_height to strictly prevent visible vertical overflow over cell boundaries
+            if current_y + line_height <= cy + available_height + (line_height * 0.5): # allow slight visual overlap
+                draw.text((cx, current_y), line, fill="black", font=cell_font)
                 current_y += line_height + 2
     
     return table_height

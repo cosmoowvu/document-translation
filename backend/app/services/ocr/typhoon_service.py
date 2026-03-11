@@ -42,8 +42,8 @@ class TyphoonOCRService:
         lang_hints = {
             "tha_Thai": ("Thai", "Thai script (เช่น ก ข ค ง)"),
             "th":        ("Thai", "Thai script (เช่น ก ข ค ง)"),
-            "jpn_Jpan":  ("Japanese", "Japanese script — carefully distinguish similar characters: ソ/ン, シ/ツ, ロ/口, ウ/ワ, ク/タ"),
-            "ja":        ("Japanese", "Japanese script — carefully distinguish similar characters: ソ/ン, シ/ツ, ロ/口, ウ/ワ, ク/タ"),
+            "jpn_Jpan":  ("Japanese", "Japanese script (Kanji/Hiragana/Katakana) — STRICTLY NO Romaji or Latin alphabets for Japanese text!"),
+            "ja":        ("Japanese", "Japanese script (Kanji/Hiragana/Katakana) — STRICTLY NO Romaji or Latin alphabets for Japanese text!"),
             "zho_Hans":  ("Simplified Chinese", "Simplified Chinese characters (简体字)"),
             "zho_Hant":  ("Traditional Chinese", "Traditional Chinese characters (繁體字)"),
             "zh":        ("Chinese", "Chinese characters (汉字/漢字)"),
