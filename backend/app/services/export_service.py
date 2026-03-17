@@ -2,7 +2,6 @@
 Export Service
 สร้างไฟล์ output รูปแบบ DOCX (และอื่นๆ ที่อาจเพิ่มในอนาคต)
 """
-import os
 from typing import Dict, Any
 
 from app.config import settings

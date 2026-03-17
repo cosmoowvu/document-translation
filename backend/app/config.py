@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     UPLOAD_DIR: Path = BASE_DIR / "uploads"
     OUTPUT_DIR: Path = BASE_DIR / "outputs"
     
-    # Docling
+    # OCR Settings
     DPI: int = 200
     
     # Ollama / Translation

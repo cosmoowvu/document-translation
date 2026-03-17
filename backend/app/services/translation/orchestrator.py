@@ -7,6 +7,7 @@ from typing import List, Dict, Tuple
 from app.config import settings
 from app.services.llm_service import LLMService
 from .table_translator import TableTranslator
+from .batch_translator import BatchTranslator
 
 
 class TranslationOrchestrator:
@@ -31,9 +32,6 @@ class TranslationOrchestrator:
         Uses specialized translate_batch_typhoon method
         """
         # Delegate to BatchTranslator (which now uses Typhoon and handles splitting)
-        from .batch_translator import BatchTranslator
-        
-        # Create translator instance (using 3 blocks per batch for Typhoon)
         translator = BatchTranslator(self.llm, batch_size=3)
         
         # Translate
@@ -48,16 +46,12 @@ class TranslationOrchestrator:
     def translate_tables(
         self,
         tables: List[Dict],
-        target_lang: str,
-        use_nllb_refine: bool = False,
-        refine_model: str = None
+        target_lang: str
     ) -> List[Dict]:
         """Translate table cells"""
         return self.table_translator.translate_tables(
             tables,
-            target_lang,
-            use_nllb_refine=False, # Force false
-            refine_model=None
+            target_lang
         )
 
 

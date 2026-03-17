@@ -19,7 +19,7 @@ class OCRService:
         self,
         file_path: str,
         source_lang: str = "tha_Thai",
-        ocr_engine: str = "docling",
+        ocr_engine: str = "paddleocr",
         job_id: str = None,
         job_status: Dict = None
     ) -> Dict[str, Any]:
@@ -34,7 +34,6 @@ class OCRService:
             # Lazy load Typhoon service
             if self._typhoon is None:
                 try:
-                    from .typhoon_service import TyphoonOCRService
                     self._typhoon = TyphoonOCRService()
                 except ValueError as e:
                     print(f"⚠️ Typhoon OCR not configured: {e}")
@@ -52,7 +51,7 @@ class OCRService:
                 
             return self._opencv.process_document(file_path, source_lang, job_id=job_id, job_status=job_status)
 
-        elif ocr_engine == "paddle":
+        elif ocr_engine in ["paddle", "paddleocr"]:
             # ✅ Paddle Layout Mode (PicoDet + DBNet → block detection)
             if not hasattr(self, '_paddle_layout') or self._paddle_layout is None:
                 from .paddle_layout_service import PaddleLayoutService

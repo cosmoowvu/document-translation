@@ -3,6 +3,7 @@ Typhoon Direct Translation Module
 Handles direct translation using Typhoon Translate 1.5 (4B)
 Optimized for Thai ↔ English translation
 """
+import time
 import requests
 import re
 from typing import List, Tuple
@@ -164,10 +165,8 @@ def translate_batch_typhoon(
                 if num_duplicates > 0:
                     print(f"   ⚠️ Removed {num_duplicates} duplicate blocks from Typhoon response")
 
-                # Extract translations using regex from cleaned response
                 results = [""] * len(texts)
                 missing_blocks = []
-                failed_validation_indices = []
 
                 for i in range(len(texts)):
                     match = re.search(rf"###BLOCK{i+1}###\s*(.*?)(?=\s*###BLOCK{i+2}###|$)", cleaned_response, re.DOTALL)
@@ -240,8 +239,7 @@ def translate_batch_typhoon(
                 return results, missing_blocks
             
             elif resp.status_code in [500, 503]:
-                # ✅ Handle Model Loading Error specifically
-                import time
+                # Handle Model Loading Error specifically
                 error_msg = resp.text
                 print(f"   ⏳ Server busy/loading ({resp.status_code}): {error_msg}")
                 if "loading model" in error_msg.lower() or "busy" in error_msg.lower():
@@ -259,7 +257,6 @@ def translate_batch_typhoon(
             if "ReadTimeout" in str(e) or "ConnectTimeout" in str(e):
                  # Timeout usually means model is stuck loading big context or just slow
                  print(f"   💤 Timeout hit. Waiting 10s before retry...")
-                 import time
                  time.sleep(10)
             
             if attempt < max_retries:

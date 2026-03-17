@@ -7,7 +7,7 @@ from pathlib import Path
 from fastapi import APIRouter, UploadFile, File, HTTPException
 
 from app.config import settings
-from app.services.cache_service import compute_file_hash
+from app.services.cache_service import compute_file_hash, clear_cache
 
 router = APIRouter()
 
@@ -64,8 +64,6 @@ async def delete_job(job_id: str):
     """
     ลบไฟล์ทั้งหมดของ job (uploads และ outputs)
     """
-    import shutil
-    
     deleted = {"uploads": False, "outputs": False}
     errors = []
     
@@ -100,8 +98,6 @@ async def cleanup_all():
     """
     ลบไฟล์ทั้งหมดใน uploads และ outputs (สำหรับ cleanup)
     """
-    import shutil
-    
     deleted_count = {"uploads": 0, "outputs": 0, "cache": 0}
     errors = []
     
@@ -124,7 +120,6 @@ async def cleanup_all():
                     deleted_count["outputs"] += 1
                     
         # ✅ Clear cache index as well
-        from app.services.cache_service import clear_cache
         clear_cache()
         deleted_count["cache"] = 1
         print("🗑️ Cleared cache index")

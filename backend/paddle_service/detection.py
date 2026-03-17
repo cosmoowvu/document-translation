@@ -55,13 +55,13 @@ def get_paddle_layout_blocks(img: np.ndarray, struct_engine) -> List[Dict]:
         results = struct_engine.predict(img)
         for res_idx, res in enumerate(results):
             # ── DEBUG: inspect result structure once ──────────────────────
-            if res_idx == 0:
-                print(f"   [LAYOUT DEBUG] result type: {type(res)}")
-                try:
-                    boxes_sample = res.get("boxes", [])
-                    print(f"   [LAYOUT DEBUG] boxes count={len(boxes_sample)}, sample[0]={boxes_sample[0] if boxes_sample else 'empty'}")
-                except Exception:
-                    pass
+            # if res_idx == 0:
+            #     print(f"   [LAYOUT DEBUG] result type: {type(res)}")
+            #     try:
+            #         boxes_sample = res.get("boxes", [])
+            #         print(f"   [LAYOUT DEBUG] boxes count={len(boxes_sample)}, sample[0]={boxes_sample[0] if boxes_sample else 'empty'}")
+            #     except Exception:
+            #         pass
             # ─────────────────────────────────────────────────────────────
 
             # DetResult is a dict: res["boxes"] → list of box dicts
@@ -80,7 +80,7 @@ def get_paddle_layout_blocks(img: np.ndarray, struct_engine) -> List[Dict]:
                     score    = float(getattr(box, "score", 1.0))
 
                 raw_count += 1
-                print(f"   [LAYOUT RAW] cls={cls_name} score={score:.3f} coord={coord}")
+                # print(f"   [LAYOUT RAW] cls={cls_name} score={score:.3f} coord={coord}")
 
                 if not coord or len(coord) not in (4, 8):
                     continue
@@ -92,7 +92,7 @@ def get_paddle_layout_blocks(img: np.ndarray, struct_engine) -> List[Dict]:
 
                 thresh = _SCORE_THRESH.get(cls_name, 0.50)
                 if score < thresh:
-                    print(f"   [LAYOUT SKIP] {cls_name} score {score:.3f} < {thresh}")
+                    # print(f"   [LAYOUT SKIP] {cls_name} score {score:.3f} < {thresh}")
                     continue
 
                 x1, y1, x2, y2 = coord

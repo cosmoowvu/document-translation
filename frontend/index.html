@@ -41,17 +41,12 @@
             <div class="language-row">
                 <div class="form-group">
                     <label>ภาษาต้นฉบับ</label>
-                    <select id="sourceLang">
-                        <option value="tha_Thai">ไทย</option>
-                        <option value="eng_Latn">อังกฤษ</option>
-                        <option value="jpn_Jpan">ญี่ปุ่น</option>
-                        <option value="zho_Hans">จีน</option>
-                        <option value="kor_Hang">เกาหลี</option>
+                    <select id="sourceLang" class="static-select" disabled title="ระบบจะตรวจหาภาษาให้อัตโนมัติ">
                         <option value="auto" selected>ตรวจหาภาษาอัตโนมัติ (Auto Detect)</option>
                     </select>
                 </div>
 
-                <!-- Swap Button -->
+                <!-- Swap Button (Hidden via CSS) -->
                 <button type="button" class="swap-btn" onclick="swapLanguages()" title="สลับภาษา">
                     ⇄
                 </button>
@@ -133,7 +128,7 @@
                 <button onclick="clearAllFiles()"
                     style="background: transparent; color: #888; border: 1px solid #555; padding: 5px 10px; border-radius: 4px; font-size: 0.75rem; cursor: pointer;"
                     title="ลบไฟล์ทั้งหมดบน Server">
-                    🗑️ ล้างไฟล์ทั้งหมด
+                    🗑️ ลบไฟล์ทั้งหมด
                 </button>
             </div>
         </div>

@@ -1,6 +1,8 @@
 import time
 import os
 import re
+import math
+import cv2
 import fitz
 from PIL import Image
 from typing import Dict, Any, List
@@ -8,6 +10,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from app.config import settings
 from app.services.ocr import ocr_service
 from app.utils.logger import get_job_logger
+from app.utils.bbox_utils import merge_overlapping_blocks
 
 def run_ocr_pipeline(
     file_path: str, 
@@ -25,7 +28,7 @@ def run_ocr_pipeline(
     ocr_start = time.time()
     
     # Update status
-    job_status[job_id]["message"] = "กำลังวิเคราะห์ Layout (PaddleOCR)..."
+    job_status[job_id]["message"] = "กำลังวิเคราะห์ Layout..."
     
     # ------------------------------------------------------------------
     # 1. Layout Analysis (OpenCV)
@@ -47,7 +50,6 @@ def run_ocr_pipeline(
     print(f"✅ PaddleOCR Layout Analysis complete. Blocks found: {sum(len(p['blocks']) for p in layout_result['pages'].values())}")
     
     # [NEW] Merge overlapping blocks to ensure no X/Y coordinate overlap (especially Thai vowels)
-    from app.utils.bbox_utils import merge_overlapping_blocks
     total_before = sum(len(p['blocks']) for p in layout_result['pages'].values())
     for page_key, page_data in layout_result["pages"].items():
         page_data["blocks"] = merge_overlapping_blocks(page_data["blocks"])
@@ -69,6 +71,10 @@ def run_ocr_pipeline(
     # Temporary directory for crops
     crop_dir = settings.OUTPUT_DIR / job_id / "crops"
     os.makedirs(crop_dir, exist_ok=True)
+    
+    # Internal logs/debug directory for this job
+    log_dir = settings.OUTPUT_DIR / job_id / "logs"
+    os.makedirs(log_dir, exist_ok=True)
     
     # Open PDF for cropping
     pdf_doc = fitz.open(file_path)
@@ -98,12 +104,6 @@ def run_ocr_pipeline(
         
         # ── Debug: Draw detected blocks on page image and save to logs/ ──
         try:
-            import cv2
-            
-            log_dir = settings.OUTPUT_DIR / job_id / "logs"
-            os.makedirs(log_dir, exist_ok=True)
-            
-            # Load the full page image we just saved
             debug_img = cv2.imread(str(full_page_path))
             if debug_img is not None:
                 page_w_pts  = page_data.get("width",  pdf_page.rect.width)
@@ -152,7 +152,9 @@ def run_ocr_pipeline(
                 cv2.imwrite(str(debug_path), debug_img)
                 print(f"   🔍 Debug image saved: {debug_path.name}")
         except Exception as _dbg_err:
+            import traceback
             print(f"   ⚠️ Debug image generation failed: {_dbg_err}")
+            traceback.print_exc()
         # ─────────────────────────────────────────────────────────────────
         
         if page_num_key not in doc_result["pages"]:
@@ -279,7 +281,6 @@ def process_single_block(i, block, pdf_page, page_num_key, crop_dir, job_id, job
                     
                 avg = sum(pixels) / len(pixels)
                 var = sum((x - avg) ** 2 for x in pixels) / len(pixels)
-                import math
                 std_dev = math.sqrt(var)
                 
                 # Truly blank / solid-color block — skip entirely

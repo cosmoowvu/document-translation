@@ -3,6 +3,7 @@ Batch Translator Module
 Handles batch translation logic with retry and chunking
 """
 import re
+from collections import Counter, defaultdict
 from typing import List, Dict, Tuple
 
 
@@ -238,8 +239,7 @@ class BatchTranslator:
             
             # Use most common detected language as src_lang for batch
             detected_langs = [all_tasks[i]['detected_lang'] for i in to_translate_indices]
-            from collections import Counter
-            lang_counter = Counter(detected_langs)
+            lang_counter = Counter(detected_langs) # Define lang_counter here
             src_lang = lang_counter.most_common(1)[0][0] if lang_counter else "eng_Latn"
             if src_lang == "unknown":
                 src_lang = "eng_Latn"
@@ -384,7 +384,6 @@ class BatchTranslator:
         
         # 3. Reconstruct Blocks
         # Group tasks by original_idx
-        from collections import defaultdict, Counter
         block_parts = defaultdict(list)
         block_langs = defaultdict(list)
         

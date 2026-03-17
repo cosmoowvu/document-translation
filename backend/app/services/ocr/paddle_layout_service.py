@@ -10,8 +10,6 @@ This service scales them to PDF points so the rest of the pipeline
 (fitz-based cropping) works identically.
 """
 import os
-import io
-import numpy as np
 from pathlib import Path
 from typing import Dict, Any, List
 
@@ -128,20 +126,11 @@ class PaddleLayoutService:
                 bbox_px      = b.get("bbox",      [0, 0, 0, 0])
                 crop_bbox_px = b.get("crop_bbox", bbox_px)
 
-                def _to_pts(bbox_px_list):
-                    x1, y1, x2, y2 = bbox_px_list
-                    return {
-                        "x1": float(x1) * scale_x,
-                        "y1": float(y1) * scale_y,
-                        "x2": float(x2) * scale_x,
-                        "y2": float(y2) * scale_y,
-                    }
-
                 converted_blocks.append({
                     "text":       "",
                     "label":      label,
-                    "bbox":       _to_pts(bbox_px),
-                    "crop_bbox":  _to_pts(crop_bbox_px),
+                    "bbox":       self._to_pts(bbox_px, scale_x, scale_y),
+                    "crop_bbox":  self._to_pts(crop_bbox_px, scale_x, scale_y),
                     "confidence": confidence,
                 })
 
@@ -163,4 +152,15 @@ class PaddleLayoutService:
             "num_pages":  num_pages,
             "pages":      pages_result,
             "ocr_engine": "paddle_layout",
+        }
+
+    @staticmethod
+    def _to_pts(bbox_px_list, scale_x: float, scale_y: float) -> dict:
+        """Convert pixel bbox [x1,y1,x2,y2] to PDF points dict."""
+        x1, y1, x2, y2 = bbox_px_list
+        return {
+            "x1": float(x1) * scale_x,
+            "y1": float(y1) * scale_y,
+            "x2": float(x2) * scale_x,
+            "y2": float(y2) * scale_y,
         }

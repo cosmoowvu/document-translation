@@ -5,17 +5,6 @@ Handles loading, unloading, and preloading models for optimal resource usage
 import requests
 from typing import List
 
-def get_loaded_models(ollama_url: str) -> List[str]:
-    """Get list of currently loaded models"""
-    try:
-        base_url = ollama_url.replace('/api/generate', '')
-        resp = requests.get(f"{base_url}/api/tags", timeout=10)
-        if resp.status_code == 200:
-            models = resp.json().get("models", [])
-            return [m["name"] for m in models]
-    except Exception as e:
-        print(f"   ⚠️ Failed to get loaded models: {e}")
-    return []
 
 
 def unload_model(model_name: str, ollama_url: str) -> bool:

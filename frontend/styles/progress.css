@@ -27,12 +27,6 @@
     transition: width 0.3s ease;
 }
 
-.progress-text {
-    text-align: center;
-    color: #666;
-    margin-bottom: 10px;
-}
-
 .progress-detail {
     text-align: center;
     color: #999;

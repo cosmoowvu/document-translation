@@ -461,11 +461,6 @@ class OpenCVService:
         
         return final_blocks
 
-        if debug_out_dir:
-            cv2.imwrite(str(debug_out_dir / f"page_{page_num}_7_blocks_merged.png"), debug_blocks_img)
-        
-        return final_blocks
-
     def _scale_blocks(self, blocks: List[Dict], scale_x: float, scale_y: float, offset_x: float = 0, offset_y: float = 0) -> List[Dict]:
         """Scale bounding boxes and apply offset"""
         scaled = []
@@ -493,13 +488,6 @@ class OpenCVService:
                 cx2 = (b["crop_bbox"]["x2"] * scale_x) + offset_x
                 cy2 = (b["crop_bbox"]["y2"] * scale_y) + offset_y
                 
-                new_b["crop_bbox"] = {
-                    "x1": min(cx1, cx2),
-                    "y1": min(cy1, cy2),
-                    "x2": max(cx2, cx2), # Potential typo here: cx2, cx2 -> fixed to min/max
-                    "y2": max(cy2, cy2)
-                }
-                # Fix typo above: cx2 is max, so compare cx1, cx2
                 new_b["crop_bbox"] = {
                     "x1": min(cx1, cx2),
                     "y1": min(cy1, cy2),

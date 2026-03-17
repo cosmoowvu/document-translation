@@ -1,6 +1,7 @@
 """
 Translation API Endpoint
 """
+import json
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from typing import Optional
@@ -33,6 +34,30 @@ class TranslateResponse(BaseModel):
 job_status = {}
 
 
+def _parse_stats(stats_file_path) -> dict:
+    """
+    Helper: อ่านและ parse stats.json เป็น format ที่ frontend คาดหวัง
+    """
+    try:
+        with open(stats_file_path, "r", encoding="utf-8") as f:
+            raw_stats = json.load(f)
+        return {
+            "ocr_seconds": raw_stats.get("timings", {}).get("ocr_seconds", 0),
+            "translate_seconds": raw_stats.get("timings", {}).get("translation_seconds", 0),
+            "render_seconds": raw_stats.get("timings", {}).get("render_seconds", 0),
+            "total_seconds": raw_stats.get("timings", {}).get("total_seconds", 0),
+            "blocks_translated": raw_stats.get("blocks", {}).get("translated", 0),
+            "blocks_skipped": raw_stats.get("blocks", {}).get("skipped", 0),
+            "languages": raw_stats.get("languages", {}),
+            "ocr_engine": raw_stats.get("ocr_engine", "paddleocr"),
+            "translation_mode": raw_stats.get("translation_mode", "typhoon_direct"),
+            "detected_language": raw_stats.get("detected_language")
+        }
+    except Exception as e:
+        print(f"   ⚠️ Error loading stats: {e}")
+        return {}
+
+
 @router.post("/translate", response_model=TranslateResponse)
 async def translate_document(
     request: TranslateRequest,
@@ -63,9 +88,9 @@ async def translate_document(
     # ===== Result Caching =====
     file_path = str(original_files[0])
     file_hash = compute_file_hash(file_path)
-    translation_mode = request.translation_mode or "qwen_direct"
+    translation_mode = request.translation_mode or "typhoon_direct"
     # Fixed defaults for single workflow
-    ocr_engine = "typhoon" # Virtual ID for cache
+    ocr_engine = "typhoon"  # Virtual ID for cache
     render_mode = "markdown"
 
     # Generate cache key
@@ -85,26 +110,8 @@ async def translate_document(
             stats = {}
             cached_stats_file = settings.OUTPUT_DIR / cached_job_id / "logs" / "stats.json"
             if cached_stats_file.exists():
-                try:
-                    import json
-                    with open(cached_stats_file, "r", encoding="utf-8") as f:
-                        raw_stats = json.load(f)
-                    # Format stats to match frontend expectations
-                    stats = {
-                        "ocr_seconds": raw_stats.get("timings", {}).get("ocr_seconds", 0),
-                        "translate_seconds": raw_stats.get("timings", {}).get("translation_seconds", 0),
-                        "render_seconds": raw_stats.get("timings", {}).get("render_seconds", 0),
-                        "total_seconds": raw_stats.get("timings", {}).get("total_seconds", 0),
-                        "blocks_translated": raw_stats.get("blocks", {}).get("translated", 0),
-                        "blocks_skipped": raw_stats.get("blocks", {}).get("skipped", 0),
-                        "languages": raw_stats.get("languages", {}),
-                        "ocr_engine": raw_stats.get("ocr_engine", "docling"),
-                        "translation_mode": raw_stats.get("translation_mode", "qwen_direct"),
-                        "detected_language": raw_stats.get("detected_language") # ✅ Add detected language
-                    }
-                    print(f"   📊 Loaded stats from cache: OCR={stats.get('ocr_engine')}, Time={stats.get('total_seconds')}s")
-                except Exception as e:
-                    print(f"   ⚠️ Error loading cached stats: {e}")
+                stats = _parse_stats(cached_stats_file)
+                print(f"   📊 Loaded stats from cache: OCR={stats.get('ocr_engine')}, Time={stats.get('total_seconds')}s")
             
             job_status[job_id] = {
                 "status": "completed",
@@ -177,25 +184,7 @@ async def get_status(job_id: str):
             stats = {}
             stats_file = output_dir / "logs" / "stats.json"
             if stats_file.exists():
-                try:
-                    import json
-                    with open(stats_file, "r", encoding="utf-8") as f:
-                        raw_stats = json.load(f)
-                    # Format stats to match frontend expectations
-                    stats = {
-                        "ocr_seconds": raw_stats.get("timings", {}).get("ocr_seconds", 0),
-                        "translate_seconds": raw_stats.get("timings", {}).get("translation_seconds", 0),
-                        "render_seconds": raw_stats.get("timings", {}).get("render_seconds", 0),
-                        "total_seconds": raw_stats.get("timings", {}).get("total_seconds", 0),
-                        "blocks_translated": raw_stats.get("blocks", {}).get("translated", 0),
-                        "blocks_skipped": raw_stats.get("blocks", {}).get("skipped", 0),
-                        "languages": raw_stats.get("languages", {}),
-                        "ocr_engine": raw_stats.get("ocr_engine", "docling"),  # ✅ Add OCR engine
-                        "translation_mode": raw_stats.get("translation_mode", "qwen_direct"),  # ✅ Add translation mode
-                        "detected_language": raw_stats.get("detected_language") # ✅ Add detected language
-                    }
-                except Exception as e:
-                    print(f"Error loading stats: {e}")
+                stats = _parse_stats(stats_file)
 
             return {
                 "job_id": job_id,

@@ -179,19 +179,8 @@ class LLMService:
         # Use target_lang code directly in prompt, or try to humanize it slightly if needed
         # But mostly LLMs understand "Translate to tha_Thai" or just "Translate to Thai"
         # Let's try to pass the code directly if it's standard, or use it as name
+        # Typhoon understands FLORES-200 codes (e.g. tha_Thai) directly — pass the code as-is.
         target_name = target_lang
-        
-        # Simple heuristic to make it friendlier if it's a known code style
-        if "_" in target_lang:
-            # e.g. tha_Thai -> Thai
-            try:
-                # This is just a helper, detection/translation should be robust
-                # If we want purely dynamic, we can just say "Translate to {target_lang}"
-                # But "Translate to tha_Thai" might be weird for some models.
-                # Let's just use the code, Typhoon knows these codes well (FLORES-200).
-                pass
-            except:
-                pass
         
         lines_text = []
         for idx, text in enumerate(texts):

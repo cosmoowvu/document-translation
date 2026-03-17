@@ -1,4 +1,5 @@
 
+import re
 # Import from new translation modules
 from app.services.translation import translation_service
 
@@ -57,8 +58,7 @@ def _run_qwen3_final_pass(
         if not ranges:
             return False  # English or unknown → no leakage concern
         # Strip HTML tags so <td>, <tr> etc. don't dilute the ratio
-        import re as _re
-        clean = _re.sub(r'<[^>]+>', '', text)
+        clean = re.sub(r'<[^>]+>', '', text)
         total = len(clean)
         if total == 0:
             return False
@@ -149,13 +149,7 @@ def process_translation(job_id: str, file_path: str, source_lang: str, target_la
     from app.utils.logger import get_job_logger
     from app.services.cache_service import save_to_cache
     
-    # Map translation_mode to model
-    # We only support Typhoon now
-    mode_to_model = {
-        "typhoon_direct": "scb10x/typhoon-translate1.5-4b:latest",
-    }
-    
-    model = mode_to_model.get("typhoon_direct") # Force Typhoon
+    model = "scb10x/typhoon-translate1.5-4b:latest"
     
     # Set model (auto-unloads previous model to free VRAM)
     translation_service.llm.set_model(model)
@@ -228,15 +222,11 @@ def process_translation(job_id: str, file_path: str, source_lang: str, target_la
             print("🔍 Using per-block language detection...")
             # Will be handled by batch_translator with hybrid approach
         
-        skip_translation_phase = False
-
-        
         # ✅ Check if cancelled after OCR
         if job_status.get(job_id, {}).get("cancelled", False):
             print(f"✅ Job {job_id[:8]}... cancelled successfully (after OCR)")
             return
         
-        # ★ Save original preview (ALL pages) for frontend comparison
         # ★ Save original preview (ALL pages) for frontend comparison
         try:
              from app.utils.preview_utils import generate_preview_images
@@ -253,94 +243,85 @@ def process_translation(job_id: str, file_path: str, source_lang: str, target_la
             return
         
         # Step 2: Translate
-        if skip_translation_phase:
-             translate_start = time.time()
-             pass
-        else:
-            job_status[job_id]["progress"] = 50
-            job_status[job_id]["message"] = "กำลังแปลภาษา..."
-            translate_start = time.time()
-        
+        job_status[job_id]["progress"] = 50
+        job_status[job_id]["message"] = "กำลังแปลภาษา..."
+        translate_start = time.time()
         logger.log_translation_start()
         
         total_pages = doc_result["num_pages"]
         
-        # Loop pages (Run only if NOT skipping)
-        if not skip_translation_phase:
-            for page_no in range(1, total_pages + 1):
-                # เช็คว่า job ถูกยกเลิกหรือไม่
-                if job_status.get(job_id, {}).get("cancelled", False):
-                    print(f"⚠️ Job {job_id} ถูกยกเลิก - หยุดการแปล")
-                    job_status[job_id]["status"] = "cancelled"
-                    job_status[job_id]["message"] = "ยกเลิกกระบวนการแล้ว"
-                    logger.log_error("Job cancelled by user")
-                    logger.finalize()
-                    return
-                
-                # Support both integer and string page keys (JSON converts int to string)
-                page_data = doc_result["pages"].get(page_no) or doc_result["pages"].get(str(page_no))
-                
-                # Skip if page_data is None (shouldn't happen, but safety check)
-                if page_data is None:
-                    print(f"   ⚠️ Page {page_no} not found in doc_result, skipping...")
-                    continue
-                
-                # Translate text blocks - Use Typhoon Direct
-                translated_blocks, stats = translation_service.translate_blocks_typhoon(
-                    page_data["blocks"], 
-                    target_lang,
-                    source_lang=source_lang,
-                    job_status=job_status,
-                    job_id=job_id
-                )
-
-                # Get page key (could be int or string from JSON)
-                page_key = page_no if page_no in doc_result["pages"] else str(page_no)
-                doc_result["pages"][page_key]["blocks"] = translated_blocks
-                total_translated += stats["translated"]
-                total_skipped += stats["skipped"]
-                
-                # Translate tables
-                tables = page_data.get("tables", [])
-                if tables:
-                    translated_tables = translation_service.translate_tables(
-                        tables, 
-                        target_lang,
-                        use_nllb_refine=False, # Disable NLLB
-                        refine_model=None
-                    )
-                    doc_result["pages"][page_key]["tables"] = translated_tables
-                    total_table_cells += sum(len(t.get('cells', [])) for t in translated_tables)
-                else:
-                    translated_tables = []
-                
-                # บันทึก log แต่ละ block
-                for idx, block in enumerate(translated_blocks):
-                    logger.log_block(
-                        page_no=page_no,
-                        block_idx=idx + 1,
-                        original=block.get("original_text", ""),
-                        translated=block.get("text", ""),
-                        detected_lang=block.get("detected_lang", "unknown"),
-                        was_translated=block.get("was_translated", True),
-                        qwen3_fallback=block.get("qwen3_fallback", False)
-                    )
-                
-                # บันทึก log แต่ละตาราง
-                for table_idx, table in enumerate(translated_tables):
-                    logger.log_table(
-                        page_no=page_no,
-                        table_idx=table_idx + 1,
-                        num_rows=table.get("num_rows", 0),
-                        num_cols=table.get("num_cols", 0),
-                        cells=table.get("cells", [])
-                    )
-                
-                # Update progress (50-80%)
-                progress = 50 + int((page_no / total_pages) * 30)
-                job_status[job_id]["progress"] = progress
-                job_status[job_id]["message"] = f"แปลหน้า {page_no}/{total_pages}..."
+        for page_no in range(1, total_pages + 1):
+            # เช็คว่า job ถูกยกเลิกหรือไม่
+            if job_status.get(job_id, {}).get("cancelled", False):
+                print(f"⚠️ Job {job_id} ถูกยกเลิก - หยุดการแปล")
+                job_status[job_id]["status"] = "cancelled"
+                job_status[job_id]["message"] = "ยกเลิกกระบวนการแล้ว"
+                logger.log_error("Job cancelled by user")
+                logger.finalize()
+                return
             
+            # Support both integer and string page keys (JSON converts int to string)
+            page_data = doc_result["pages"].get(page_no) or doc_result["pages"].get(str(page_no))
+            
+            # Skip if page_data is None (shouldn't happen, but safety check)
+            if page_data is None:
+                print(f"   ⚠️ Page {page_no} not found in doc_result, skipping...")
+                continue
+            
+            # Translate text blocks - Use Typhoon Direct
+            translated_blocks, stats = translation_service.translate_blocks_typhoon(
+                page_data["blocks"], 
+                target_lang,
+                source_lang=source_lang,
+                job_status=job_status,
+                job_id=job_id
+            )
+
+            # Get page key (could be int or string from JSON)
+            page_key = page_no if page_no in doc_result["pages"] else str(page_no)
+            doc_result["pages"][page_key]["blocks"] = translated_blocks
+            total_translated += stats["translated"]
+            total_skipped += stats["skipped"]
+            
+            # Translate tables
+            tables = page_data.get("tables", [])
+            if tables:
+                translated_tables = translation_service.translate_tables(
+                    tables, 
+                    target_lang
+                )
+                doc_result["pages"][page_key]["tables"] = translated_tables
+                total_table_cells += sum(len(t.get('cells', [])) for t in translated_tables)
+            else:
+                translated_tables = []
+            
+            # บันทึก log แต่ละ block
+            for idx, block in enumerate(translated_blocks):
+                logger.log_block(
+                    page_no=page_no,
+                    block_idx=idx + 1,
+                    original=block.get("original_text", ""),
+                    translated=block.get("text", ""),
+                    detected_lang=block.get("detected_lang", "unknown"),
+                    was_translated=block.get("was_translated", True),
+                    qwen3_fallback=block.get("qwen3_fallback", False)
+                )
+            
+            # บันทึก log แต่ละตาราง
+            for table_idx, table in enumerate(translated_tables):
+                logger.log_table(
+                    page_no=page_no,
+                    table_idx=table_idx + 1,
+                    num_rows=table.get("num_rows", 0),
+                    num_cols=table.get("num_cols", 0),
+                    cells=table.get("cells", [])
+                )
+            
+            # Update progress (50-80%)
+            progress = 50 + int((page_no / total_pages) * 30)
+            job_status[job_id]["progress"] = progress
+            job_status[job_id]["message"] = f"แปลหน้า {page_no}/{total_pages}..."
+        
         translate_duration = time.time() - translate_start
         logger.log_translation_complete(total_translated, total_skipped, translate_duration)
 

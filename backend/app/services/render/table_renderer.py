@@ -192,8 +192,7 @@ def draw_table(draw: ImageDraw.ImageDraw, table: Dict, scale: float, font_servic
         table_font_size = min(table_font_size, best_size)
 
     # Second pass: Draw all cells with the uniform font size
-    font = font_service.get_font(table_font_size)
-    
+
     for cell in valid_cells:
         text = cell["text"]
         cx = cell["cx"]

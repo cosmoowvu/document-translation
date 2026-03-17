@@ -25,7 +25,7 @@ def compute_file_hash(file_path: str) -> str:
     return hasher.hexdigest()
 
 
-def get_cache_key(file_hash: str, source_lang: str, target_lang: str, model: str, ocr_engine: str = "docling") -> str:
+def get_cache_key(file_hash: str, source_lang: str, target_lang: str, model: str, ocr_engine: str = "paddleocr") -> str:
     """สร้าง cache key จาก hash + parameters (รวม OCR engine ด้วย)"""
     return f"{file_hash}_{source_lang}_{target_lang}_{model}_{ocr_engine}"
 

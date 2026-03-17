@@ -188,21 +188,12 @@
     height: 18px;
 }
 
-/* Old file display - kept for backward compatibility but hidden */
-.file-display {
-    display: none;
-}
-
-.file-display.active {
-    display: none;
-}
-
 
 /* Language Select Row */
 .language-row {
     display: grid;
-    grid-template-columns: 1fr auto 1fr;
-    gap: 16px;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
     align-items: end;
     margin-bottom: 24px;
 }
@@ -239,6 +230,29 @@
     box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1);
 }
 
+/* Static select for Auto Detect (Read-only look but keeping vibrant color) */
+.static-select {
+    appearance: none !important;
+    background-image: none !important;
+    background-color: #fff !important; /* Match active white background */
+    cursor: default !important;
+    color: #333 !important; /* Darker text */
+    border-color: #e0e0e0 !important; /* Match active border */
+    opacity: 1 !important; /* Ensure browsers don't fade it due to disabled attr */
+}
+
+/* For browsers that apply specific styles to disabled select */
+.static-select:disabled {
+    color: #333 !important;
+    opacity: 1 !important;
+    -webkit-text-fill-color: #333 !important; /* Specifically for Safari/Chrome */
+    background-color: #fff !important;
+}
+
+.swap-btn {
+    display: none !important;
+}
+
 /* Default upload content */
 .upload-content {
     display: block;
@@ -246,52 +260,6 @@
 
 .upload-content.hidden {
     display: none;
-}
-
-/* ===================================
-   OCR Engine Selector Styles
-   =================================== */
-
-.ocr-selector {
-    display: flex;
-    gap: 12px;
-    margin-top: 8px;
-}
-
-.ocr-option {
-    flex: 1;
-    cursor: pointer;
-    position: relative;
-}
-
-.ocr-option input[type="radio"] {
-    position: absolute;
-    opacity: 0;
-    cursor: pointer;
-}
-
-.ocr-label {
-    display: flex;
-    flex-direction: column;
-    padding: 14px 16px;
-    border: 2px solid #e0e0e0;
-    border-radius: 8px;
-    background: white;
-    transition: all 0.3s ease;
-}
-
-.ocr-option:hover .ocr-label {
-    border-color: #10b981;
-    background: #f0fdf4;
-}
-
-.ocr-option input[type="radio"]:checked+.ocr-label {
-    border-color: #10b981;
-    background: #dcfce7;
-    box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1);
-}
-
-.ocr-name {
     font-weight: 600;
     color: #333;
     font-size: 0.95rem;

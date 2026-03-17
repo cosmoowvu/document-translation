@@ -157,9 +157,7 @@ class TableTranslator:
     def translate_cells(
         self,
         cells: List[Dict],
-        target_lang: str,
-        use_nllb_refine: bool = False,
-        refine_model: str = None
+        target_lang: str
     ) -> List[Dict]:
         """แปล cells ในตาราง PDF (Typhoon Direct)"""
         if not cells:
@@ -245,9 +243,7 @@ class TableTranslator:
     def translate_tables(
         self,
         tables: List[Dict],
-        target_lang: str,
-        use_nllb_refine: bool = False,
-        refine_model: str = None
+        target_lang: str
     ) -> List[Dict]:
         """แปลทุกตารางในหน้า (สำหรับ PDF)"""
         if not tables:

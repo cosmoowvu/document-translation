@@ -6,8 +6,6 @@ pydantic>=2.5.0
 pydantic-settings>=2.1.0
 
 # Document Processing
-docling>=2.0.0
-docling-core>=2.0.0
 pillow>=10.0.0
 PyMuPDF>=1.23.0
 opencv-python>=4.8.0

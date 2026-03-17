@@ -19,13 +19,6 @@ function saveState(jobId, view) {
 // Expose to window for other scripts
 window.saveState = saveState;
 
-// Escape HTML
-function escapeHTML(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
-
 // Swap Languages
 function swapLanguages() {
     const sourceLang = document.getElementById('sourceLang');
@@ -68,6 +61,7 @@ function updateSwapButtonState() {
 // Expose to window
 window.updateSwapButtonState = updateSwapButtonState;
 window.swapLanguages = swapLanguages;
+window.resetApp = resetApp;
 
 // Reset App - Just reset UI, don't delete files
 async function resetApp() {

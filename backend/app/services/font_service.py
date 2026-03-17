@@ -84,17 +84,15 @@ class FontService:
         if is_korean:
             # Korean > Universal > Chinese/Japanese (as fallback) > Thai
             fonts_to_try = fonts_korean + fonts_universal + fonts_chinese + fonts_japanese + thai_fonts
-            print(f"DEBUG: Korean text detected, prioritization: {fonts_to_try[0]}...")
             
         elif is_japanese:
             # Japanese > Universal > Chinese > Korean > Thai
             fonts_to_try = fonts_japanese + fonts_universal + fonts_chinese + fonts_korean + thai_fonts
-            print(f"DEBUG: Japanese text detected, prioritization: {fonts_to_try[0]}...")
             
         elif is_cjk_general:
             # Chinese (Default CJK) > Universal > Japanese > Korean > Thai
             fonts_to_try = fonts_chinese + fonts_universal + fonts_japanese + fonts_korean + thai_fonts
-            print(f"DEBUG: Generic CJK detected, prioritization: {fonts_to_try[0]}...")
+            pass
             
         else:
             # Standard Thai/English -> CJK fallbacks just in case

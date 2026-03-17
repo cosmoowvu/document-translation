@@ -4,6 +4,12 @@ Uses Typhoon OCR Cloud API (SCB10X) via typhoon-ocr package
 """
 from typing import Dict, Any
 import os
+import re
+import base64
+import tempfile
+import requests
+import fitz  # PyMuPDF
+from PIL import Image as PILImage
 
 
 class TyphoonOCRService:
@@ -27,9 +33,6 @@ class TyphoonOCRService:
         Prevents hallucination by instructing the model to read exactly what it sees.
         Returns extracted text string.
         """
-        import requests
-        import base64
-
         # Read and encode image
         with open(image_path, "rb") as f:
             image_data = base64.b64encode(f.read()).decode("utf-8")
@@ -138,12 +141,9 @@ class TyphoonOCRService:
         """
         Process document using Typhoon OCR Cloud API
         """
+
+        # Lazy import: typhoon_ocr is an optional cloud-API package
         from typhoon_ocr import ocr_document
-        from PIL import Image as PILImage
-        import fitz  # PyMuPDF
-        import tempfile
-        import re
-        
         print(f"🌪️ Using Typhoon OCR (Cloud API)")
         
         # Determine file type and page count

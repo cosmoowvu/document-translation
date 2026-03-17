@@ -82,9 +82,9 @@ class JobLogger:
         self.stats["detected_language"] = detected_lang
     
     def log_block(self, page_no: int, block_idx: int, original: str, translated: str, 
-                  detected_lang: str, was_translated: bool, nllb_translated: str = None,
+                  detected_lang: str, was_translated: bool,
                   qwen3_fallback: bool = False):
-        """บันทึก log ของแต่ละ block (พร้อม NLLB translation ถ้ามี)"""
+        """บันทึก log ของแต่ละ block"""
         # Ensure directory exists (defensive)
         self.log_dir.mkdir(parents=True, exist_ok=True)
         
@@ -100,8 +100,6 @@ class JobLogger:
         with open(log_file, "a", encoding="utf-8") as f:
             f.write(f"Block {block_idx} [{status}]{qwen3_tag} (detected: {detected_lang})\n")
             f.write(f"  Original: {original}\n")
-            if nllb_translated:  # If NLLB translation exists
-                f.write(f"  NLLB:     {nllb_translated}\n")
             f.write(f"  Result:   {translated}\n")
             f.write("-" * 60 + "\n")
     

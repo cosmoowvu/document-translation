@@ -5,8 +5,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from pathlib import Path
 import zipfile
-import io
-import shutil
+from PIL import Image
 
 from app.config import settings
 
@@ -40,7 +39,6 @@ async def export_file(job_id: str, format: str = "pdf"):
             
             if format in ["jpg", "jpeg"]:
                 # แปลง PNG เป็น JPG
-                from PIL import Image
                 jpg_path = output_dir / "translated_001.jpg"
                 if not jpg_path.exists():
                     img = Image.open(img_file)
@@ -67,7 +65,6 @@ async def export_file(job_id: str, format: str = "pdf"):
             for i, img_file in enumerate(files, 1):
                 # ถ้าต้องการ JPG ต้องแปลงก่อน
                 if format in ["jpg", "jpeg"]:
-                    from PIL import Image
                     jpg_path = output_dir / f"translated_{i:03d}.jpg"
                     if not jpg_path.exists():
                         img = Image.open(img_file)

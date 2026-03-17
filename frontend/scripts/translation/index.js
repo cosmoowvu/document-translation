@@ -88,7 +88,11 @@ async function pollStatus() {
 
         if (data.status === 'completed') {
             localStorage.removeItem('translationState');
-            await showResult();
+            // Show 100% and wait a bit before switching to result
+            TranslationUI.showProgress(data.message || 'เสร็จสิ้น', 100);
+            setTimeout(async () => {
+                await showResult();
+            }, 800);
         } else if (data.status === 'cancelled') {
             console.log('Job was cancelled');
             localStorage.removeItem('translationState');

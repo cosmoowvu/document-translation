@@ -19,6 +19,7 @@ import uvicorn
 import shutil
 import os
 import tempfile
+import fitz
 from typing import List, Dict, Any
 
 # Disable oneDNN to fix Windows compatibility issues
@@ -35,22 +36,8 @@ app = FastAPI(title="PaddleOCR Service")
 # ---------------------------------------------------------------------------
 # Engine caches
 # ---------------------------------------------------------------------------
-ocr_engines: Dict[str, Any] = {}
 _struct_engine = None   # PicoDet Layout Detection
 _det_engine    = None   # DBNet Text Detection
-
-
-def get_ocr_engine(lang: str = 'en'):
-    if lang not in ocr_engines:
-        print(f"📥 Loading PaddleOCR ({lang}) [CPU mode]...")
-        ocr_engines[lang] = PaddleOCR(
-            use_angle_cls=True,
-            lang=lang,
-            use_gpu=False,
-            show_log=False
-        )
-        print(f"✅ PaddleOCR ({lang}) [CPU mode] ready")
-    return ocr_engines[lang]
 
 
 def get_layout_engines():
@@ -116,7 +103,6 @@ async def detect_layout(
         num_pages = 0
 
         if is_pdf:
-            import fitz
             doc = fitz.open(tmp_path)
             num_pages = len(doc)
 
@@ -279,158 +265,7 @@ def _detect_page(
     return page_info
 
 
-# ---------------------------------------------------------------------------
-# /process endpoint  (Legacy – kept for compatibility)
-# ---------------------------------------------------------------------------
 
-def extract_blocks_from_result(result: List, page_height: float, pixel_to_point_ratio: float = 1.0) -> List[Dict]:
-    """Convert PaddleOCR result to standard block format."""
-    blocks = []
-    if not result or not result[0]:
-        return blocks
-
-    for line in result[0]:
-        bbox_points = line[0]
-        text_info   = line[1]
-        text        = text_info[0]
-        confidence  = text_info[1]
-
-        if confidence < 0.5:
-            continue
-
-        x_coords = [point[0] for point in bbox_points]
-        y_coords = [point[1] for point in bbox_points]
-
-        x1_px, y1_px = min(x_coords), min(y_coords)
-        x2_px, y2_px = max(x_coords), max(y_coords)
-
-        x1 = x1_px * pixel_to_point_ratio
-        y1 = y1_px * pixel_to_point_ratio
-        x2 = x2_px * pixel_to_point_ratio
-        y2 = y2_px * pixel_to_point_ratio
-
-        if len(blocks) == 0:
-            print(f"   🔍 Coordinate conversion - ratio={pixel_to_point_ratio:.4f}")
-            print(f"      Pixel: ({x1_px:.1f}, {y1_px:.1f}) -> ({x2_px:.1f}, {y2_px:.1f})")
-            print(f"      Point: ({x1:.1f}, {y1:.1f}) -> ({x2:.1f}, {y2:.1f})")
-
-        blocks.append({
-            "text": text,
-            "bbox": {"x1": x1, "y1": y1, "x2": x2, "y2": y2},
-            "label": "text",
-            "confidence": confidence
-        })
-
-    return blocks
-
-
-@app.post("/process")
-async def process_document(
-    file: UploadFile = File(...),
-    lang: str = Form("en")
-):
-    try:
-        suffix = os.path.splitext(file.filename)[1]
-        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-            shutil.copyfileobj(file.file, tmp)
-            tmp_path = tmp.name
-
-        try:
-            ocr = get_ocr_engine(lang)
-            result = ocr.ocr(tmp_path, cls=True)
-
-            response_data = {
-                "num_pages": 1,
-                "pages": {},
-                "ocr_engine": "paddleocr"
-            }
-
-            is_pdf = tmp_path.lower().endswith('.pdf')
-
-            if is_pdf:
-                import fitz
-                from PIL import Image as PILImage
-                import io
-
-                doc = fitz.open(tmp_path)
-                num_pages = len(doc)
-                response_data["num_pages"] = num_pages
-
-                for i in range(num_pages):
-                    page = doc[i]
-                    page_result = result[i] if i < len(result) and result[i] is not None else None
-
-                    page_width_pts  = page.rect.width
-                    page_height_pts = page.rect.height
-
-                    pixel_width = pixel_height = None
-                    if page_result and len(page_result) > 0:
-                        max_x = max_y = 0
-                        for line in page_result:
-                            for point in line[0]:
-                                max_x = max(max_x, point[0])
-                                max_y = max(max_y, point[1])
-                        pixel_width, pixel_height = max_x, max_y
-                        print(f"   📐 Page {i+1}: Detected max coordinates: {pixel_width:.0f}x{pixel_height:.0f} px")
-
-                    if pixel_width is None or pixel_width == 0:
-                        assumed_dpi = 200
-                        pixel_width  = page_width_pts  * assumed_dpi / 72
-                        pixel_height = page_height_pts * assumed_dpi / 72
-                        print(f"   ⚠️ Page {i+1}: No text detected, assuming {assumed_dpi} DPI")
-
-                    pixel_to_point_ratio = page_width_pts / pixel_width
-                    print(f"   📄 Page {i+1}: {pixel_width:.0f}x{pixel_height:.0f} px -> {page_width_pts:.1f}x{page_height_pts:.1f} pts (ratio={pixel_to_point_ratio:.4f})")
-
-                    blocks = extract_blocks_from_result(
-                        [page_result] if page_result else [],
-                        pixel_height,
-                        pixel_to_point_ratio
-                    )
-
-                    response_data["pages"][i + 1] = {
-                        "width":  page_width_pts,
-                        "height": page_height_pts,
-                        "blocks": blocks,
-                        "tables": []
-                    }
-                doc.close()
-
-            else:
-                from PIL import Image
-                img = Image.open(tmp_path)
-                pixel_width, pixel_height = img.size
-                dpi = img.info.get('dpi', (300, 300))[0] if isinstance(img.info.get('dpi'), tuple) else 300
-                img.close()
-
-                pixel_to_point_ratio = 72.0 / dpi
-                width_pts  = pixel_width  * pixel_to_point_ratio
-                height_pts = pixel_height * pixel_to_point_ratio
-
-                print(f"   🖼️ Image: {pixel_width}x{pixel_height} px @ {dpi} DPI -> {width_pts:.1f}x{height_pts:.1f} pts (ratio={pixel_to_point_ratio:.4f})")
-
-                blocks = extract_blocks_from_result(result, pixel_height, pixel_to_point_ratio)
-
-                response_data["pages"][1] = {
-                    "width":  width_pts,
-                    "height": height_pts,
-                    "blocks": blocks,
-                    "tables": []
-                }
-
-            return response_data
-
-        finally:
-            try:
-                if os.path.exists(tmp_path):
-                    os.unlink(tmp_path)
-            except Exception:
-                pass
-
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":
