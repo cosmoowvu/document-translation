@@ -75,7 +75,7 @@ cd document-translator
 # Ollama URL (Default คือ http://localhost:11434)
 OLLAMA_URL=http://localhost:11434
 
-# Typhoon OCR API Key (กรณีต้องการใช้ OCR ของ Typhoon)
+# Typhoon OCR API Key (สามารถรับคีย์ได้ที่ https://playground.opentyphoon.ai/settings/api-key)
 TYPHOON_OCR_API_KEY=your_typhoon_api_key_here
 ```
 
