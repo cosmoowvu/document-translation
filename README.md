@@ -17,8 +17,8 @@
 ### 1. การเตรียมโปรเจกต์
 เปิด Terminal (Command Prompt หรือ PowerShell) และรันคำสั่ง:
 ```bash
-git clone <url-of-this-repository>
-cd document-translator
+git clone https://github.com/cosmoowvu/document-translation.git
+cd document-translation
 ```
 
 ### 2. ตั้งค่า Backend (ตัวหลัก)
